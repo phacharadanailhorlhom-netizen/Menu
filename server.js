@@ -1,4 +1,4 @@
-// ===== ระบบสั่งอาหารร้านค้า: JSONBin Sync, Table Status Management =====
+// ===== ระบบสั่งอาหารร้านค้า: JSONBin Sync, Table Management (Add/Delete Tables) =====
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -25,6 +25,7 @@ let db = {
   users: [{ username: 'admin', password: hashPw('admin123'), role: 'admin' }],
   menu: [],
   orders: [],
+  tables: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'], // รายชื่อโต๊ะในร้าน
   settings: { 
     theme: '#e85d04', 
     shopName: 'เลยมาตำ', 
@@ -66,6 +67,7 @@ async function initStorage() {
   if (!db.users || !Array.isArray(db.users)) db.users = [{ username: 'admin', password: hashPw('admin123'), role: 'admin' }];
   if (!db.menu || !Array.isArray(db.menu)) db.menu = [];
   if (!db.orders || !Array.isArray(db.orders)) db.orders = [];
+  if (!db.tables || !Array.isArray(db.tables)) db.tables = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
   if (!db.settings) db.settings = {};
   if (!db.settings.shopName) db.settings.shopName = 'เลยมาตำ';
   if (!db.settings.theme) db.settings.theme = '#e85d04';
@@ -147,6 +149,27 @@ const server = http.createServer(async (req, res) => {
       return true;
     };
     const [, part, id] = p.split('/').filter(Boolean);
+
+    // API จัดการโต๊ะ
+    if (part === 'tables') {
+      if (method === 'GET') return send(res, 200, db.tables);
+      if (!need('admin')) return;
+      if (method === 'POST') {
+        const tableName = String(body.name || '').trim();
+        if (!tableName) return send(res, 400, { error: 'กรุณาระบุชื่อหรือหมายเลขโต๊ะ' });
+        if (db.tables.includes(tableName)) return send(res, 400, { error: 'มีโต๊ะนี้อยู่ในระบบแล้ว' });
+        db.tables.push(tableName);
+        db.tables.sort((a, b) => String(a).localeCompare(String(b), 'th', { numeric: true }));
+        save();
+        return send(res, 201, db.tables);
+      }
+      if (method === 'DELETE' && id) {
+        const tableName = decodeURIComponent(id);
+        db.tables = db.tables.filter(t => t !== tableName);
+        save();
+        return send(res, 200, db.tables);
+      }
+    }
 
     if (part === 'settings' && method === 'GET') return send(res, 200, db.settings);
     if (part === 'settings' && method === 'PUT') {
@@ -506,7 +529,6 @@ function renderMenu(list) {
     else if (activeCat !== 'all') filtered = filtered.filter(m => m.category === activeCat);
   }
 
-  // เรียงลำดับรายการอาหารตามหมวดหมู่ที่ตั้งค่าไว้ และเรียงตามชื่อต่อ
   filtered.sort((a, b) => {
     let indexA = customCatOrder.indexOf(a.category);
     let indexB = customCatOrder.indexOf(b.category);
@@ -649,7 +671,7 @@ const ADMIN_BODY = `
   </div>
   <nav id="adminNav">
     <button data-tab="orders" class="active" onclick="switchTab('orders')">🛎️ ออเดอร์ลูกค้า</button>
-    <button data-tab="tablesTab" onclick="switchTab('tablesTab')">🪑 สถานะโต๊ะ</button>
+    <button data-tab="tablesTab" onclick="switchTab('tablesTab')">🪑 จัดการโต๊ะ</button>
     <button data-tab="menuTab" class="adminOnly" onclick="switchTab('menuTab')">🍲 จัดการเมนูอาหาร</button>
     <button data-tab="settingsTab" class="adminOnly" onclick="switchTab('settingsTab')">🎨 ตั้งค่าร้านและเสียง</button>
     <button data-tab="users" class="adminOnly" onclick="switchTab('users')">👥 จัดการผู้ใช้</button>
@@ -675,9 +697,15 @@ const ADMIN_BODY = `
   </section>
 
   <section id="tablesTab" class="tab" hidden>
+    <div class="panel" style="max-width:600px; margin-bottom:20px;" class="adminOnly">
+      <h3>➕ เพิ่ม / 🗑️ ลบ โต๊ะอาหารในร้าน</h3>
+      <form onsubmit="addNewTable(event)" style="display:flex; gap:8px; margin-top:10px;">
+        <input id="newTableName" placeholder="ระบุชื่อหรือหมายเลขโต๊ะ เช่น 11, โซน A1" required style="margin:0; flex:1;">
+        <button type="submit" class="primary" style="margin:0; width:auto; padding:10px 20px;">+ เพิ่มโต๊ะใหม่</button>
+      </form>
+    </div>
     <div class="panel">
-      <h3>🪑 ภาพรวมสถานะโต๊ะอาหารในร้าน</h3>
-      <p class="muted">สถานะโต๊ะจะอัปเดตตามออเดอร์ปัจจุบันแบบเรียลไทม์</p>
+      <h3>🪑 ภาพรวมสถานะโต๊ะทั้งหมด</h3>
       <div id="tableStatusContainer" class="grid" style="margin-top: 16px;"></div>
     </div>
   </section>
@@ -801,7 +829,7 @@ const ADMIN_BODY = `
 `;
 
 const ADMIN_JS = `
-let me = null, menuData = [], allOrdersCache = [];
+let me = null, menuData = [], allOrdersCache = [], tablesData = [];
 let lastOrderCount = -1;
 let loopAlertTimer = null;
 let currentFilterMode = 'today';
@@ -968,6 +996,7 @@ async function init() {
   if ($('soundUnlockBar')) $('soundUnlockBar').hidden = false;
   switchTab('orders');
   loadOrders();
+  loadTables();
   loadSettingsForm();
   if (me.role === 'admin') { loadMenu(); loadUsers(); }
 }
@@ -999,6 +1028,7 @@ function switchTab(tabId) {
     if(b.dataset.tab === tabId) b.classList.add('active');
     else b.classList.remove('active');
   });
+  if (tabId === 'tablesTab') loadTables();
 }
 
 function setOrderDate(mode, val) {
@@ -1093,13 +1123,44 @@ function renderOrdersView() {
   }
 }
 
+async function loadTables() {
+  try {
+    tablesData = await api('/api/tables');
+    renderTableStatusView();
+  } catch(e) {}
+}
+
+async function addNewTable(e) {
+  e.preventDefault();
+  const nameInput = $('newTableName');
+  const tableName = nameInput.value.trim();
+  if (!tableName) return;
+  try {
+    tablesData = await api('/api/tables', { method: 'POST', body: { name: tableName } });
+    nameInput.value = '';
+    renderTableStatusView();
+    alert('เพิ่มโต๊ะเรียบร้อยแล้ว');
+  } catch(err) {
+    alert(err.message);
+  }
+}
+
+async function deleteTable(tableName) {
+  if (!confirm('ต้องการลบโต๊ะ "' + tableName + '" ออกจากระบบใช่หรือไม่?')) return;
+  try {
+    tablesData = await api('/api/tables/' + encodeURIComponent(tableName), { method: 'DELETE' });
+    renderTableStatusView();
+    alert('ลบโต๊ะเรียบร้อยแล้ว');
+  } catch(err) {
+    alert(err.message);
+  }
+}
+
 function renderTableStatusView() {
   const container = $('tableStatusContainer');
   if (!container) return;
 
-  const defaultTables = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'VIP1', 'VIP2'];
-  const activeTablesFromOrders = allOrdersCache.map(o => o.table);
-  const allTables = [...new Set([...defaultTables, ...activeTablesFromOrders])].sort((a, b) => {
+  const allTables = [...new Set([...tablesData, ...allOrdersCache.map(o => o.table)])].sort((a, b) => {
     return String(a).localeCompare(String(b), 'th', { numeric: true });
   });
 
@@ -1120,7 +1181,8 @@ function renderTableStatusView() {
       statusBg = '#06b6d4'; 
     }
 
-    html += '<div class="panel" style="border-top: 5px solid ' + statusBg + '; text-align: center;">' +
+    html += '<div class="panel" style="border-top: 5px solid ' + statusBg + '; text-align: center; position: relative;">' +
+      (me && me.role === 'admin' ? '<button type="button" onclick="deleteTable(\\'' + esc(tbl) + '\\')" style="position: absolute; top: 8px; right: 8px; background: none; border: none; color: #ef4444; font-size: 0.8rem; padding: 2px 6px;" title="ลบโต๊ะ">❌</button>' : '') +
       '<h2 style="margin: 6px 0; font-size: 1.4rem;">โต๊ะ ' + esc(tbl) + '</h2>' +
       '<span class="badge" style="background: ' + statusBg + '; display: inline-block; margin-bottom: 10px;">' + statusText + '</span>' +
       '<p style="font-size: 0.85rem; margin: 4px 0;" class="muted">ออเดอร์ค้าง: ' + tblOrders.length + ' รายการ</p>' +
