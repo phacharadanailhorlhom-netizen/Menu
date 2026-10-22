@@ -1,4 +1,4 @@
-// ===== ระบบสั่งอาหารร้านค้า: JSONBin Sync, Admin Fixed, หมวดหมู่เรียงลำดับ =====
+// ===== ระบบสั่งอาหารร้านค้า: JSONBin Sync, Admin Header Fix, จัดการหมวดหมู่แบบเลือก =====
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -33,7 +33,7 @@ let db = {
     customAudio: '', 
     soundVolume: '1.0', 
     loopInterval: '5',
-    categoryOrder: 'อาหารจานเดียว, ต้ม/แกง, ส้มตำ/ยำ, เครื่องดื่ม' // ค่าเริ่มต้นลำดับหมวดหมู่
+    categoryOrder: [] // เก็บเป็นอาเรย์ของหมวดหมู่
   },
   nextMenuId: 1,
   nextOrderId: 1
@@ -72,7 +72,7 @@ async function initStorage() {
   if (!db.settings.soundVolume) db.settings.soundVolume = '1.0';
   if (!db.settings.customAudio) db.settings.customAudio = '';
   if (!db.settings.loopInterval) db.settings.loopInterval = '5';
-  if (!db.settings.categoryOrder) db.settings.categoryOrder = 'อาหารจานเดียว, ต้ม/แกง, ส้มตำ/ยำ, เครื่องดื่ม';
+  if (!db.settings.categoryOrder || !Array.isArray(db.settings.categoryOrder)) db.settings.categoryOrder = [];
   
   db.menu.forEach(m => { if (m.hasPlaraOption === undefined) m.hasPlaraOption = false; });
   save();
@@ -158,7 +158,7 @@ const server = http.createServer(async (req, res) => {
       if (body.customAudio !== undefined) db.settings.customAudio = String(body.customAudio);
       if (body.soundVolume) db.settings.soundVolume = String(body.soundVolume);
       if (body.loopInterval) db.settings.loopInterval = String(body.loopInterval);
-      if (body.categoryOrder !== undefined) db.settings.categoryOrder = String(body.categoryOrder);
+      if (Array.isArray(body.categoryOrder)) db.settings.categoryOrder = body.categoryOrder;
       save();
       return send(res, 200, db.settings);
     }
@@ -300,13 +300,10 @@ const CSS = `
 :root { --primary: ${db.settings.theme}; }
 * { box-sizing: border-box; }
 body { margin: 0; font-family: system-ui, sans-serif; background: #f8f9fa; color: #212529; }
-header { display: flex; justify-content: space-between; align-items: center; position: relative; padding: 12px 20px; background: var(--primary); color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,.1); }
+header { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: var(--primary); color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,.1); }
 .brand { display: flex; align-items: center; gap: 12px; }
-.brand img { width: 65px; height: 65px; border-radius: 50%; object-fit: cover; background: #fff; border: 2px solid rgba(255,255,255,.8); flex-shrink: 0; }
-header h1 { margin: 0; font-size: 1.5rem; position: absolute; left: 50%; transform: translateX(-50%); text-align: center; white-space: nowrap; }
-@media (max-width: 450px) {
-  header h1 { font-size: 1.3rem; }
-}
+.brand img { width: 55px; height: 55px; border-radius: 50%; object-fit: cover; background: #fff; border: 2px solid rgba(255,255,255,.8); flex-shrink: 0; }
+header h1 { margin: 0; font-size: 1.2rem; font-weight: bold; white-space: nowrap; }
 
 .sticky-category-bar {
   position: sticky;
@@ -401,8 +398,8 @@ async function loadSettings() {
     const s = await api('/api/settings');
     if (s.theme) document.documentElement.style.setProperty('--primary', s.theme);
     if (s.shopName && $('shopNameText')) $('shopNameText').textContent = s.shopName;
-    if (s.categoryOrder) {
-      customCatOrder = s.categoryOrder.split(',').map(x => x.trim()).filter(Boolean);
+    if (Array.isArray(s.categoryOrder)) {
+      customCatOrder = s.categoryOrder;
     }
     document.querySelectorAll('.shopLogo').forEach(img => {
       if (s.logo && s.logo.trim() !== '') {
@@ -426,7 +423,7 @@ const SHOP_BODY = `
 <header>
   <div class="brand">
     <img class="shopLogo" hidden alt="Logo">
-    <h1 id="shopNameText" style="font-size: 1.6rem; font-weight: bold; margin:0;">เลยมาตำ</h1>
+    <h1 id="shopNameText">เลยมาตำ</h1>
   </div>
   <label style="margin:0;">โต๊ะ: <input id="table" size="4" onchange="localStorage.setItem('table', this.value); loadTableOrders();"></label>
 </header>
@@ -478,7 +475,6 @@ async function loadMenu() {
 
 function renderCatTabs() {
   const rawCats = [...new Set(menu.map(m => m.category))];
-  // จัดเรียงหมวดหมู่ตาม customCatOrder ที่แอดมินตั้งค่าไว้
   const cats = rawCats.sort((a, b) => {
     let indexA = customCatOrder.indexOf(a);
     let indexB = customCatOrder.indexOf(b);
@@ -622,7 +618,7 @@ const ADMIN_BODY = `
 <header>
   <div class="brand">
     <img class="shopLogo" hidden alt="Logo">
-    <h1 style="font-size: 1.2rem; margin:0; font-weight: bold;">🔐 ระบบหลังร้าน</h1>
+    <h1 style="font-size: 1.1rem; margin:0;">🔐 ระบบหลังร้าน</h1>
   </div>
   <span>
     <span id="who"></span> 
@@ -716,8 +712,10 @@ const ADMIN_BODY = `
       </div>
       <div style="margin-top:8px;"><img id="logoPreview" hidden style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:1px solid #e2e8f0;" alt="ตัวอย่างโลโก้"></div>
 
-      <label style="margin-top:10px; display:block;">ลำดับการแสดงหมวดหมู่ (คั่นด้วยจุลภาค ,):</label>
-      <input id="setCatOrder" placeholder="เช่น อาหารจานเดียว, ต้ม/แกง, ส้มตำ/ยำ, เครื่องดื่ม">
+      <label style="margin-top:10px; display:block;">จัดลำดับการแสดงหมวดหมู่ (ลากสลับหรือเลือกอันที่ต้องการให้ขึ้นก่อน):</label>
+      <div id="categoryOrderList" style="background:#f1f5f9; padding:8px; border-radius:8px; margin-bottom:10px;">
+        <p class="muted" style="margin:4px 0; font-size:0.9rem;">กำลังโหลดหมวดหมู่ที่มีในระบบ...</p>
+      </div>
 
       <label style="margin-top:10px; display:block;">เลือกโทนสีหลักของร้าน:</label>
       <div style="display:flex; gap:10px; margin:8px 0;">
@@ -1138,12 +1136,16 @@ async function delMenu(id) {
   try { await api('/api/menu/' + id, { method: 'DELETE' }); loadMenu(); } catch (e) { alert(e.message); }
 }
 
+let currentSettingsCatOrder = [];
+
 async function loadSettingsForm() {
   try {
     const s = await api('/api/settings');
     if (s.theme && $('setTheme')) $('setTheme').value = s.theme;
     if (s.shopName && $('setName')) $('setName').value = s.shopName;
-    if (s.categoryOrder && $('setCatOrder')) $('setCatOrder').value = s.categoryOrder;
+    if (Array.isArray(s.categoryOrder)) {
+      currentSettingsCatOrder = s.categoryOrder;
+    }
     if (s.logo && $('setLogo')) {
       $('setLogo').value = s.logo;
       const prev = $('logoPreview');
@@ -1158,7 +1160,58 @@ async function loadSettingsForm() {
     window.currentCustomAudio = s.customAudio || '';
     window.currentSoundVol = Number(s.soundVolume || '1.0');
     window.currentLoopInterval = Number(s.loopInterval || '5') * 1000;
+
+    renderCategoryOrderUI();
   } catch(e){}
+}
+
+async function renderCategoryOrderUI() {
+  try {
+    const menuList = await api('/api/menu');
+    const allCats = [...new Set(menuList.map(m => m.category))];
+    
+    // จัดเรียงตามค่าเดิมที่เซฟไว้ หรือเอาอันที่ยังไม่มีไว้ข้างหลัง
+    let ordered = [...currentSettingsCatOrder];
+    allCats.forEach(c => { if (!ordered.includes(c)) ordered.push(c); });
+    // กรองเอาเฉพาะหมวดที่มีอยู่จริงในระบบตอนนี้
+    ordered = ordered.filter(c => allCats.includes(c));
+    currentSettingsCatOrder = ordered;
+
+    let html = '';
+    if (!ordered.length) {
+      html = '<p class="muted" style="margin:4px 0; font-size:0.9rem;">ยังไม่มีหมวดหมู่ในระบบ (ให้เพิ่มเมนูก่อน)</p>';
+    } else {
+      ordered.forEach((cat, idx) => {
+        html += '<div style="display:flex; justify-content:space-between; align-items:center; background:#fff; padding:6px 10px; margin:4px 0; border-radius:6px; border:1px solid #cbd5e1;">' +
+          '<span><b>' + (idx + 1) + '.</b> ' + esc(cat) + '</span>' +
+          '<div>' +
+          (idx > 0 ? '<button type="button" onclick="moveCat(' + idx + ', -1)" style="padding:2px 8px; margin-right:4px;">⬆️ ขึ้น</button>' : '') +
+          (idx < ordered.length - 1 ? '<button type="button" onclick="moveCat(' + idx + ', 1)" style="padding:2px 8px;">⬇️ ลง</button>' : '') +
+          '</div></div>';
+      });
+    }
+    $('categoryOrderList').innerHTML = html;
+  } catch(e) {}
+}
+
+function moveCat(index, direction) {
+  const target = index + direction;
+  if (target < 0 || target >= currentSettingsCatOrder.length) return;
+  const temp = currentSettingsCatOrder[index];
+  currentSettingsCatOrder[index] = currentSettingsCatOrder[target];
+  currentSettingsCatOrder[target] = temp;
+  
+  // เรนเดอร์หน้าจอตั้งค่าใหม่ทันที
+  let html = '';
+  currentSettingsCatOrder.forEach((cat, idx) => {
+    html += '<div style="display:flex; justify-content:space-between; align-items:center; background:#fff; padding:6px 10px; margin:4px 0; border-radius:6px; border:1px solid #cbd5e1;">' +
+      '<span><b>' + (idx + 1) + '.</b> ' + esc(cat) + '</span>' +
+      '<div>' +
+      (idx > 0 ? '<button type="button" onclick="moveCat(' + idx + ', -1)" style="padding:2px 8px; margin-right:4px;">⬆️ ขึ้น</button>' : '') +
+      (idx < currentSettingsCatOrder.length - 1 ? '<button type="button" onclick="moveCat(' + idx + ', 1)" style="padding:2px 8px;">⬇️ ลง</button>' : '') +
+      '</div></div>';
+  });
+  $('categoryOrderList').innerHTML = html;
 }
 
 async function saveSettings() {
@@ -1171,13 +1224,13 @@ async function saveSettings() {
       customAudio: $('setCustomAudio').value,
       soundVolume: $('setVol').value,
       loopInterval: $('setLoopInterval').value,
-      categoryOrder: $('setCatOrder').value
+      categoryOrder: currentSettingsCatOrder
     };
     const res = await api('/api/settings', { method: 'PUT', body: body });
     document.documentElement.style.setProperty('--primary', res.theme);
     if ($('shopNameText')) $('shopNameText').textContent = res.shopName;
-    if (res.categoryOrder) {
-      customCatOrder = res.categoryOrder.split(',').map(x => x.trim()).filter(Boolean);
+    if (Array.isArray(res.categoryOrder)) {
+      customCatOrder = res.categoryOrder;
     }
     document.querySelectorAll('.shopLogo').forEach(img => {
       if(res.logo) { img.onerror = function(){ img.hidden = true; }; img.src = res.logo; img.hidden = false; } else { img.hidden = true; }
@@ -1205,7 +1258,7 @@ async function loadUsers() {
 async function submitUserForm(e) {
   e.preventDefault();
   try {
-    await api('/api/users', { method: 'POST', body: { username: $('nu').value.trim(), password: $('np').value, role: $('nr').value } });
+    await api('/api/users', { method: 'POST', body: { username: $('nu').value.trim(), password: $('p').value, role: $('nr').value } });
     $('userForm').reset();
     loadUsers();
     alert('เพิ่มผู้ใช้สำเร็จ!');
