@@ -1109,18 +1109,20 @@ async function delMenu(id) {
 async function loadSettingsForm() {
   try {
     const s = await api('/api/settings');
-    if (s.theme && $('setTheme')) $('setTheme').value = s.theme;
-    if (s.shopName && $('setName')) $('setName').value = s.shopName;
-    if (s.logo && $('setLogo')) {
-      $('setLogo').value = s.logo;
-      const prev = $('logoPreview');
-      if (prev) { prev.src = s.logo; prev.hidden = false; }
-    }
-    if (s.soundType && $('setSound')) $('setSound').value = s.soundType;
-    if (s.customAudio && $('setCustomAudio')) $('setCustomAudio').value = s.customAudio;
-    if (s.soundVolume && $('setVol')) $('setVol').value = s.soundVolume;
-    if (s.loopInterval && $('setLoopInterval')) $('setLoopInterval').value = s.loopInterval;
+    if (s.theme) document.documentElement.style.setProperty('--primary', s.theme);
+    if (s.shopName && $('shopNameText')) $('shopNameText').textContent = s.shopName;
     
+    // จุดนี้สำคัญ: เช็คว่ามีโลโก้ไหม ถ้ามีให้แสดงรูป ถ้าไม่มีให้ซ่อน
+    document.querySelectorAll('.shopLogo').forEach(img => {
+      if (s.logo && s.logo.trim() !== '') {
+        img.onerror = function () { img.hidden = true; };
+        img.src = s.logo;
+        img.hidden = false; // เอาซ่อนออกเพื่อให้รูปโชว์
+      } else {
+        img.hidden = true;  // ถ้าไม่มีโลโก้ ให้ซ่อนวงกลมโลโก้ไว้
+      }
+    });
+
     window.currentSoundType = s.soundType || 'bell';
     window.currentCustomAudio = s.customAudio || '';
     window.currentSoundVol = Number(s.soundVolume || '1.0');
