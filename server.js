@@ -8,8 +8,8 @@ const PORT = process.env.PORT || 3000;
 const DATA_FILE = path.join(__dirname, 'data.json');
 
 // ตั้งค่า JSONBin (ใส่ค่าของคุณตรงนี้เพื่อเก็บบนคลาวด์ไม่ให้หายเวลา Render รีสตาร์ท)
-const JSONBIN_ID = process.env.JSONBIN_ID || ''; 
-const JSONBIN_KEY = process.env.JSONBIN_KEY || ''; 
+const JSONBIN_ID = process.env.JSONBIN_ID || '6ad9eacdffd5d1605382454d'; 
+const JSONBIN_KEY = process.env.JSONBIN_KEY || '$2a$10$8u3JlCEVMeRuRLHXIL/R/OT0QICvvBrsx2LQykKP4jv/rJD5qN2je'; 
 
 function hashPw(pw, salt) {
   salt = salt || crypto.randomBytes(16).toString('hex');
