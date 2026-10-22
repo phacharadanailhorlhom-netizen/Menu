@@ -1,4 +1,4 @@
-// ===== ระบบสั่งอาหารร้านค้า: JSONBin Sync, Sticky Category Header, เลื่อนอิสระ =====
+// ===== ระบบสั่งอาหารร้านค้า: JSONBin Sync, Admin Fixed, หมวดหมู่เรียงลำดับ =====
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -23,13 +23,21 @@ function checkPw(pw, stored) {
 
 let db = {
   users: [{ username: 'admin', password: hashPw('admin123'), role: 'admin' }],
-  menu: [], // <-- ลบเมนูตัวอย่างออกทั้งหมด เหลือแค่นี้
+  menu: [],
   orders: [],
-  settings: { theme: '#e85d04', shopName: 'เลยมาตำ', logo: '', soundType: 'bell', customAudio: '', soundVolume: '1.0', loopInterval: '5' },
-  nextMenuId: 1,  // เริ่มต้นไอดีเมนูที่ 1
+  settings: { 
+    theme: '#e85d04', 
+    shopName: 'เลยมาตำ', 
+    logo: '', 
+    soundType: 'bell', 
+    customAudio: '', 
+    soundVolume: '1.0', 
+    loopInterval: '5',
+    categoryOrder: 'อาหารจานเดียว, ต้ม/แกง, ส้มตำ/ยำ, เครื่องดื่ม' // ค่าเริ่มต้นลำดับหมวดหมู่
+  },
+  nextMenuId: 1,
   nextOrderId: 1
 };
-
 
 async function initStorage() {
   let loaded = false;
@@ -58,10 +66,13 @@ async function initStorage() {
   if (!db.users || !Array.isArray(db.users)) db.users = [{ username: 'admin', password: hashPw('admin123'), role: 'admin' }];
   if (!db.menu || !Array.isArray(db.menu)) db.menu = [];
   if (!db.orders || !Array.isArray(db.orders)) db.orders = [];
-  if (!db.settings) db.settings = { theme: '#e85d04', shopName: 'ร้านอาหารของเรา', logo: '', soundType: 'bell', customAudio: '', soundVolume: '1.0', loopInterval: '5' };
+  if (!db.settings) db.settings = {};
+  if (!db.settings.shopName) db.settings.shopName = 'เลยมาตำ';
+  if (!db.settings.theme) db.settings.theme = '#e85d04';
   if (!db.settings.soundVolume) db.settings.soundVolume = '1.0';
   if (!db.settings.customAudio) db.settings.customAudio = '';
   if (!db.settings.loopInterval) db.settings.loopInterval = '5';
+  if (!db.settings.categoryOrder) db.settings.categoryOrder = 'อาหารจานเดียว, ต้ม/แกง, ส้มตำ/ยำ, เครื่องดื่ม';
   
   db.menu.forEach(m => { if (m.hasPlaraOption === undefined) m.hasPlaraOption = false; });
   save();
@@ -147,6 +158,7 @@ const server = http.createServer(async (req, res) => {
       if (body.customAudio !== undefined) db.settings.customAudio = String(body.customAudio);
       if (body.soundVolume) db.settings.soundVolume = String(body.soundVolume);
       if (body.loopInterval) db.settings.loopInterval = String(body.loopInterval);
+      if (body.categoryOrder !== undefined) db.settings.categoryOrder = String(body.categoryOrder);
       save();
       return send(res, 200, db.settings);
     }
@@ -293,10 +305,9 @@ header { display: flex; justify-content: space-between; align-items: center; pos
 .brand img { width: 65px; height: 65px; border-radius: 50%; object-fit: cover; background: #fff; border: 2px solid rgba(255,255,255,.8); flex-shrink: 0; }
 header h1 { margin: 0; font-size: 1.5rem; position: absolute; left: 50%; transform: translateX(-50%); text-align: center; white-space: nowrap; }
 @media (max-width: 450px) {
-  header h1 { font-size: 1.3rem; } /* ปรับขนาดบนจอมือถือเล็กให้พอดีไม่ล้น */
+  header h1 { font-size: 1.3rem; }
 }
 
-/* แถบหมวดหมู่ติดด้านบนจอแบบ Sticky และเลื่อนปัดซ้าย-ขวาอิสระ */
 .sticky-category-bar {
   position: sticky;
   top: 0;
@@ -384,13 +395,17 @@ async function api(url, opts) {
   if (!r.ok) { const err = new Error(data.error || 'เกิดข้อผิดพลาด'); err.status = r.status; throw err; }
   return data;
 }
+let customCatOrder = [];
 async function loadSettings() {
   try {
     const s = await api('/api/settings');
     if (s.theme) document.documentElement.style.setProperty('--primary', s.theme);
     if (s.shopName && $('shopNameText')) $('shopNameText').textContent = s.shopName;
+    if (s.categoryOrder) {
+      customCatOrder = s.categoryOrder.split(',').map(x => x.trim()).filter(Boolean);
+    }
     document.querySelectorAll('.shopLogo').forEach(img => {
-      if (s.logo) {
+      if (s.logo && s.logo.trim() !== '') {
         img.onerror = function () { img.hidden = true; };
         img.src = s.logo;
         img.hidden = false;
@@ -411,14 +426,11 @@ const SHOP_BODY = `
 <header>
   <div class="brand">
     <img class="shopLogo" hidden alt="Logo">
-    <h1 id="shopNameText" style="font-size: 1.6rem; font-weight: bold;">เลยมาตำ</h1>
+    <h1 id="shopNameText" style="font-size: 1.6rem; font-weight: bold; margin:0;">เลยมาตำ</h1>
   </div>
-  <label>โต๊ะ: <input id="table" size="4" onchange="localStorage.setItem('table', this.value); loadTableOrders();"></label>
+  <label style="margin:0;">โต๊ะ: <input id="table" size="4" onchange="localStorage.setItem('table', this.value); loadTableOrders();"></label>
 </header>
 
-
-
-<!-- ย้ายแถบหมวดหมู่ออกมาไว้ตรงนี้ เพื่อให้เกาะติดนิ่งๆ ใต้ Header ร้าน -->
 <div class="sticky-category-bar">
   <div class="category-inner">
     <input id="searchBox" placeholder="🔍 ค้นหาเมนูอาหาร..." style="margin-bottom:8px; background:#fff;">
@@ -441,7 +453,12 @@ const SHOP_BODY = `
   </aside>
 </main>
 <div id="plaraModal" class="modalOverlay" hidden>
-  ...
+  <div class="modalBox">
+    <h3 style="margin-top:0;">🌶️ ต้องการใส่ปลาร้าไหม?</h3>
+    <p class="muted" id="plaraItemName" style="margin:4px 0 14px;"></p>
+    <button class="primary" onclick="confirmPlara('ใส่')">✅ ใส่ปลาร้า</button>
+    <button onclick="confirmPlara('ไม่ใส่')">🚫 ไม่ใส่ปลาร้า</button>
+  </div>
 </div>
 `;
 
@@ -453,13 +470,23 @@ let pendingAddId = null;
 $('table').value = new URLSearchParams(location.search).get('table') || localStorage.getItem('table') || '1';
 
 async function loadMenu() {
+  await loadSettings();
   menu = await api('/api/menu');
   renderCatTabs();
   renderMenu(menu);
 }
 
 function renderCatTabs() {
-  const cats = [...new Set(menu.map(m => m.category))];
+  const rawCats = [...new Set(menu.map(m => m.category))];
+  // จัดเรียงหมวดหมู่ตาม customCatOrder ที่แอดมินตั้งค่าไว้
+  const cats = rawCats.sort((a, b) => {
+    let indexA = customCatOrder.indexOf(a);
+    let indexB = customCatOrder.indexOf(b);
+    if (indexA === -1) indexA = 999;
+    if (indexB === -1) indexB = 999;
+    return indexA - indexB;
+  });
+
   let out = '<button type="button" class="' + (activeCat === 'all' ? 'active' : '') + '" onclick="setCat(\\'all\\')">ทั้งหมด</button>';
   out += '<button type="button" class="' + (activeCat === 'rec' ? 'active' : '') + '" onclick="setCat(\\'rec\\')">🌟 แนะนำ</button>';
   cats.forEach(c => {
@@ -603,7 +630,7 @@ const ADMIN_BODY = `
     <button id="logoutBtn" type="button" hidden>ออกจากระบบ</button>
   </span>
 </header>
-" class="panel narrow">
+<div id="loginBox" class="panel narrow">
   <h2>เข้าสู่ระบบ</h2>
   <input id="u" placeholder="ชื่อผู้ใช้" autocapitalize="off" autocomplete="username">
   <input id="p" type="password" placeholder="รหัสผ่าน" autocomplete="current-password">
@@ -688,6 +715,9 @@ const ADMIN_BODY = `
         <input id="setLogo" placeholder="หรือวาง URL โลโก้" style="margin:0;">
       </div>
       <div style="margin-top:8px;"><img id="logoPreview" hidden style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:1px solid #e2e8f0;" alt="ตัวอย่างโลโก้"></div>
+
+      <label style="margin-top:10px; display:block;">ลำดับการแสดงหมวดหมู่ (คั่นด้วยจุลภาค ,):</label>
+      <input id="setCatOrder" placeholder="เช่น อาหารจานเดียว, ต้ม/แกง, ส้มตำ/ยำ, เครื่องดื่ม">
 
       <label style="margin-top:10px; display:block;">เลือกโทนสีหลักของร้าน:</label>
       <div style="display:flex; gap:10px; margin:8px 0;">
@@ -1111,20 +1141,19 @@ async function delMenu(id) {
 async function loadSettingsForm() {
   try {
     const s = await api('/api/settings');
-    if (s.theme) document.documentElement.style.setProperty('--primary', s.theme);
-    if (s.shopName && $('shopNameText')) $('shopNameText').textContent = s.shopName;
+    if (s.theme && $('setTheme')) $('setTheme').value = s.theme;
+    if (s.shopName && $('setName')) $('setName').value = s.shopName;
+    if (s.categoryOrder && $('setCatOrder')) $('setCatOrder').value = s.categoryOrder;
+    if (s.logo && $('setLogo')) {
+      $('setLogo').value = s.logo;
+      const prev = $('logoPreview');
+      if (prev) { prev.src = s.logo; prev.hidden = false; }
+    }
+    if (s.soundType && $('setSound')) $('setSound').value = s.soundType;
+    if (s.customAudio && $('setCustomAudio')) $('setCustomAudio').value = s.customAudio;
+    if (s.soundVolume && $('setVol')) $('setVol').value = s.soundVolume;
+    if (s.loopInterval && $('setLoopInterval')) $('setLoopInterval').value = s.loopInterval;
     
-    // จุดนี้สำคัญ: เช็คว่ามีโลโก้ไหม ถ้ามีให้แสดงรูป ถ้าไม่มีให้ซ่อน
-    document.querySelectorAll('.shopLogo').forEach(img => {
-      if (s.logo && s.logo.trim() !== '') {
-        img.onerror = function () { img.hidden = true; };
-        img.src = s.logo;
-        img.hidden = false; // เอาซ่อนออกเพื่อให้รูปโชว์
-      } else {
-        img.hidden = true;  // ถ้าไม่มีโลโก้ ให้ซ่อนวงกลมโลโก้ไว้
-      }
-    });
-
     window.currentSoundType = s.soundType || 'bell';
     window.currentCustomAudio = s.customAudio || '';
     window.currentSoundVol = Number(s.soundVolume || '1.0');
@@ -1141,11 +1170,15 @@ async function saveSettings() {
       soundType: $('setSound').value,
       customAudio: $('setCustomAudio').value,
       soundVolume: $('setVol').value,
-      loopInterval: $('setLoopInterval').value
+      loopInterval: $('setLoopInterval').value,
+      categoryOrder: $('setCatOrder').value
     };
     const res = await api('/api/settings', { method: 'PUT', body: body });
     document.documentElement.style.setProperty('--primary', res.theme);
     if ($('shopNameText')) $('shopNameText').textContent = res.shopName;
+    if (res.categoryOrder) {
+      customCatOrder = res.categoryOrder.split(',').map(x => x.trim()).filter(Boolean);
+    }
     document.querySelectorAll('.shopLogo').forEach(img => {
       if(res.logo) { img.onerror = function(){ img.hidden = true; }; img.src = res.logo; img.hidden = false; } else { img.hidden = true; }
     });
