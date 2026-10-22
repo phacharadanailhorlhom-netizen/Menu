@@ -622,7 +622,7 @@ const ADMIN_BODY = `
 <header>
   <div class="brand">
     <img class="shopLogo" hidden alt="Logo">
-    <h1 style="font-size: 1.2rem; margin:0;">🔐 ระบบหลังร้าน</h1>
+    <h1 style="font-size: 1.2rem; margin:0; font-weight: bold;">🔐 ระบบหลังร้าน</h1>
   </div>
   <span>
     <span id="who"></span> 
