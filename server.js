@@ -1,4 +1,4 @@
-// ===== ระบบสั่งอาหารร้านค้า: JSONBin Sync, Admin Fixed, หมวดหมู่แบบเลือก =====
+// ===== ระบบสั่งอาหารร้านค้า: JSONBin Sync, Table Status Management =====
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -506,14 +506,13 @@ function renderMenu(list) {
     else if (activeCat !== 'all') filtered = filtered.filter(m => m.category === activeCat);
   }
 
-  // ✨ เรียงลำดับรายการอาหารตามหมวดหมู่ที่แอดมินจัดเรียงไว้ในการตั้งค่า
+  // เรียงลำดับรายการอาหารตามหมวดหมู่ที่ตั้งค่าไว้ และเรียงตามชื่อต่อ
   filtered.sort((a, b) => {
     let indexA = customCatOrder.indexOf(a.category);
     let indexB = customCatOrder.indexOf(b.category);
     if (indexA === -1) indexA = 999;
     if (indexB === -1) indexB = 999;
     if (indexA !== indexB) return indexA - indexB;
-    // ถ้าอยู่หมวดเดียวกัน ให้เรียงตามชื่อเมนูต่อ
     return a.name.localeCompare(b.name, 'th');
   });
 
@@ -650,6 +649,7 @@ const ADMIN_BODY = `
   </div>
   <nav id="adminNav">
     <button data-tab="orders" class="active" onclick="switchTab('orders')">🛎️ ออเดอร์ลูกค้า</button>
+    <button data-tab="tablesTab" onclick="switchTab('tablesTab')">🪑 สถานะโต๊ะ</button>
     <button data-tab="menuTab" class="adminOnly" onclick="switchTab('menuTab')">🍲 จัดการเมนูอาหาร</button>
     <button data-tab="settingsTab" class="adminOnly" onclick="switchTab('settingsTab')">🎨 ตั้งค่าร้านและเสียง</button>
     <button data-tab="users" class="adminOnly" onclick="switchTab('users')">👥 จัดการผู้ใช้</button>
@@ -672,6 +672,14 @@ const ADMIN_BODY = `
     </div>
     <p id="newOrderSummary" class="muted" style="margin:0 0 12px;"></p>
     <div id="ordersContainer" class="grid"></div>
+  </section>
+
+  <section id="tablesTab" class="tab" hidden>
+    <div class="panel">
+      <h3>🪑 ภาพรวมสถานะโต๊ะอาหารในร้าน</h3>
+      <p class="muted">สถานะโต๊ะจะอัปเดตตามออเดอร์ปัจจุบันแบบเรียลไทม์</p>
+      <div id="tableStatusContainer" class="grid" style="margin-top: 16px;"></div>
+    </div>
   </section>
 
   <section id="menuTab" class="tab" hidden>
@@ -713,7 +721,7 @@ const ADMIN_BODY = `
       <label>ชื่อร้านอาหาร:</label>
       <input id="setName" placeholder="ชื่อร้าน">
       
-      <label style="margin-top:10px; display:block;">โลโก้ร้าน (อัปโหลดจากเครื่อง):</label>
+      <label style="margin-top:10px; display:block;">โลโก้ร้าน (อัปโหลดจากเครื่อง หรือวางลิงก์):</label>
       <div style="display:flex; gap:8px; align-items:center;">
         <input type="file" id="logoFile" accept="image/*" style="padding:6px;" onchange="handleLogoFile(event)">
         <input id="setLogo" placeholder="หรือวาง URL โลโก้" style="margin:0;">
@@ -804,6 +812,7 @@ window.currentSoundType = 'bell';
 window.currentCustomAudio = '';
 window.currentSoundVol = 1.0;
 window.currentLoopInterval = 5000;
+window.currentActiveAudio = null;
 
 function handleFile(e) {
   const file = e.target.files[0];
@@ -865,14 +874,14 @@ function playSound(type, vol, customData) {
     const multiplier = Number(vol || 1.0);
     if (type === 'custom' && customData) {
       const audio = new Audio(customData);
-      window.currentActiveAudio = audio; // บันทึกไว้เผื่อกดหยุด
+      window.currentActiveAudio = audio;
       audio.volume = Math.min(Math.max(multiplier * 0.5, 0.1), 1.0);
       audio.play().catch(() => {
         if ($('soundUnlockBar') && !soundUnlocked) $('soundUnlockBar').hidden = false;
       });
       return;
     }
-  
+
     const ctx = getCtx();
     const now = ctx.currentTime;
     const gainNode = ctx.createGain();
@@ -930,7 +939,6 @@ function stopLoopAlert() {
     clearInterval(loopAlertTimer);
     loopAlertTimer = null;
   }
-  // ✨ เพิ่มคำสั่งเคลียร์เสียงที่กำลังเล่นหรือแทร็กเสียงค้างอยู่ให้ตัดจบ
   try {
     if (window.currentActiveAudio) {
       window.currentActiveAudio.pause();
@@ -938,19 +946,8 @@ function stopLoopAlert() {
       window.currentActiveAudio = null;
     }
   } catch(e) {}
-
   if ($('stopAlertBtn')) $('stopAlertBtn').hidden = true;
   if ($('stopAlertBtn2')) $('stopAlertBtn2').hidden = true;
-}
-
-async function setStatus(btn) {
-  try { 
-    // ✨ เมื่อกดเปลี่ยนสถานะ (กดรับออเดอร์) ให้สั่งหยุดเสียงเตือนทันที
-    stopLoopAlert();
-
-    await api('/api/orders/' + btn.dataset.id, { method: 'PATCH', body: { status: btn.dataset.s } }); 
-    loadOrders(); 
-  } catch (e) { alert(e.message); }
 }
 
 function testSound() {
@@ -1030,11 +1027,13 @@ async function loadOrders() {
     
     const tables = [...new Set(orders.map(o => o.table))].sort();
     const sel = $('filterTableSelect');
-    const curSel = sel.value;
+    const curSel = sel ? sel.value : '';
     let optHtml = '<option value="">-- ทุกโต๊ะ --</option>';
     tables.forEach(t => { optHtml += '<option value="' + esc(t) + '">โต๊ะ ' + esc(t) + '</option>'; });
-    sel.innerHTML = optHtml;
-    sel.value = curSel;
+    if (sel) {
+      sel.innerHTML = optHtml;
+      sel.value = curSel;
+    }
 
     const hasPending = orders.some(o => o.status === 'pending');
     if (lastOrderCount !== -1 && orders.length > lastOrderCount) {
@@ -1047,11 +1046,12 @@ async function loadOrders() {
     lastOrderCount = orders.length;
 
     renderOrdersView();
+    renderTableStatusView();
   } catch (e) { if (e.status === 401) init(); }
 }
 
 function renderOrdersView() {
-  const selectedTable = $('filterTableSelect').value;
+  const selectedTable = $('filterTableSelect') ? $('filterTableSelect').value : '';
   const todayStr = new Date().toISOString().split('T')[0];
 
   let filtered = allOrdersCache.filter(o => {
@@ -1070,29 +1070,83 @@ function renderOrdersView() {
   });
 
   const pendingCount = filtered.filter(o => o.status === 'pending').length;
-  $('newOrderSummary').textContent = pendingCount > 0 ? '🆕 มีออเดอร์ที่ยังไม่ได้รับ ' + pendingCount + ' รายการ' : 'ไม่มีออเดอร์ใหม่ที่ค้างอยู่';
+  if ($('newOrderSummary')) $('newOrderSummary').textContent = pendingCount > 0 ? '🆕 มีออเดอร์ที่ยังไม่ได้รับ ' + pendingCount + ' รายการ' : 'ไม่มีออเดอร์ใหม่ที่ค้างอยู่';
 
-  $('ordersContainer').innerHTML = filtered.map(o => {
-    const isNew = o.status === 'pending';
-    let s = '<div class="panel' + (isNew ? ' order-new' : '') + '" style="border-left:5px solid var(--primary);"><div class="row">' +
-      '<b>' + (isNew ? '<span class="order-new-tag">🆕 ใหม่</span>' : '') + '#' + o.id + ' โต๊ะ ' + esc(o.table) + '</b>' +
-      '<span class="badge ' + o.status + '">' + STATUS[o.status] + '</span></div>' +
-      '<small class="muted">' + new Date(o.createdAt).toLocaleString('th-TH') + '</small><ul style="margin:8px 0; padding-left:20px;">';
-    o.items.forEach(i => { 
-      s += '<li>' + esc(i.name) + ' × <b>' + i.qty + '</b>' + (i.plara ? ' <span style="color:#7c3aed;">(' + esc(i.plara) + 'ปลาร้า)</span>' : '') + (i.note ? ' <span class="muted">(' + esc(i.note) + ')</span>' : '') + '</li>'; 
-    });
-    s += '</ul><p style="margin:8px 0;"><b>รวมราคาทั้งสิ้น: ' + o.total + ' บาท</b></p><div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:8px;">';
-    
-    Object.keys(STATUS).forEach(k => {
-      s += '<button type="button" data-id="' + o.id + '" data-s="' + k + '" onclick="setStatus(this)" style="font-size:0.8rem; padding:5px 10px;"' +
-        (k === o.status ? ' disabled style="background:#cbd5e1; border-color:#cbd5e1;"' : '') + '>' + STATUS[k] + '</button> ';
-    });
-    return s + '</div></div>';
-  }).join('') || '<p>ยังไม่มีรายการออเดอร์ในเงื่อนไขนี้</p>';
+  if ($('ordersContainer')) {
+    $('ordersContainer').innerHTML = filtered.map(o => {
+      const isNew = o.status === 'pending';
+      let s = '<div class="panel' + (isNew ? ' order-new' : '') + '" style="border-left:5px solid var(--primary);"><div class="row">' +
+        '<b>' + (isNew ? '<span class="order-new-tag">🆕 ใหม่</span>' : '') + '#' + o.id + ' โต๊ะ ' + esc(o.table) + '</b>' +
+        '<span class="badge ' + o.status + '">' + STATUS[o.status] + '</span></div>' +
+        '<small class="muted">' + new Date(o.createdAt).toLocaleString('th-TH') + '</small><ul style="margin:8px 0; padding-left:20px;">';
+      o.items.forEach(i => { 
+        s += '<li>' + esc(i.name) + ' × <b>' + i.qty + '</b>' + (i.plara ? ' <span style="color:#7c3aed;">(' + esc(i.plara) + 'ปลาร้า)</span>' : '') + (i.note ? ' <span class="muted">(' + esc(i.note) + ')</span>' : '') + '</li>'; 
+      });
+      s += '</ul><p style="margin:8px 0;"><b>รวมราคาทั้งสิ้น: ' + o.total + ' บาท</b></p><div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:8px;">';
+      
+      Object.keys(STATUS).forEach(k => {
+        s += '<button type="button" data-id="' + o.id + '" data-s="' + k + '" onclick="setStatus(this)" style="font-size:0.8rem; padding:5px 10px;"' +
+          (k === o.status ? ' disabled style="background:#cbd5e1; border-color:#cbd5e1;"' : '') + '>' + STATUS[k] + '</button> ';
+      });
+      return s + '</div></div>';
+    }).join('') || '<p>ยังไม่มีรายการออเดอร์ในเงื่อนไขนี้</p>';
+  }
+}
+
+function renderTableStatusView() {
+  const container = $('tableStatusContainer');
+  if (!container) return;
+
+  const defaultTables = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'VIP1', 'VIP2'];
+  const activeTablesFromOrders = allOrdersCache.map(o => o.table);
+  const allTables = [...new Set([...defaultTables, ...activeTablesFromOrders])].sort((a, b) => {
+    return String(a).localeCompare(String(b), 'th', { numeric: true });
+  });
+
+  let html = '';
+  allTables.forEach(tbl => {
+    const tblOrders = allOrdersCache.filter(o => o.table === tbl && o.status !== 'cancelled');
+    const hasActiveOrder = tblOrders.some(o => o.status === 'pending' || o.status === 'cooking');
+    const hasServedOrder = tblOrders.some(o => o.status === 'served');
+
+    let statusText = '🟢 โต๊ะว่าง';
+    let statusBg = '#10b981'; 
+
+    if (hasActiveOrder) {
+      statusText = '🔥 มีออเดอร์/กำลังทำ';
+      statusBg = '#f59e0b'; 
+    } else if (hasServedOrder) {
+      statusText = '🍽️ กำลังทานอาหาร';
+      statusBg = '#06b6d4'; 
+    }
+
+    html += '<div class="panel" style="border-top: 5px solid ' + statusBg + '; text-align: center;">' +
+      '<h2 style="margin: 6px 0; font-size: 1.4rem;">โต๊ะ ' + esc(tbl) + '</h2>' +
+      '<span class="badge" style="background: ' + statusBg + '; display: inline-block; margin-bottom: 10px;">' + statusText + '</span>' +
+      '<p style="font-size: 0.85rem; margin: 4px 0;" class="muted">ออเดอร์ค้าง: ' + tblOrders.length + ' รายการ</p>' +
+      (tblOrders.length > 0 ? '<button type="button" onclick="clearTable(\\'' + esc(tbl) + '\\')" style="background: #ef4444; color: #fff; border: none; font-size: 0.8rem; padding: 4px 10px; margin-top: 8px;">🧹 เคลียร์โต๊ะ/เช็กบิล</button>' : '') +
+      '</div>';
+  });
+  container.innerHTML = html;
+}
+
+async function clearTable(tableNo) {
+  if (!confirm('ต้องการเคลียร์โต๊ะ ' + tableNo + ' (ลูกค้าย้ายออก/เช็กบิลแล้วใช่ไหม?)')) return;
+  try {
+    const targetOrders = allOrdersCache.filter(o => o.table === tableNo && o.status !== 'cancelled' && o.status !== 'served');
+    for (const o of targetOrders) {
+      await api('/api/orders/' + o.id, { method: 'PATCH', body: { status: 'served' } });
+    }
+    loadOrders();
+    alert('เคลียร์โต๊ะ ' + tableNo + ' เรียบร้อยแล้ว');
+  } catch(e) {
+    alert('เกิดข้อผิดพลาด: ' + e.message);
+  }
 }
 
 async function setStatus(btn) {
   try { 
+    stopLoopAlert();
     await api('/api/orders/' + btn.dataset.id, { method: 'PATCH', body: { status: btn.dataset.s } }); 
     loadOrders(); 
   } catch (e) { alert(e.message); }
@@ -1114,7 +1168,6 @@ setInterval(loadOrders, 4000);
 async function loadMenu() {
   menuData = await api('/api/menu');
   
-  // อัปเดต Dropdown เลือกหมวดหมู่ในฟอร์มเพิ่ม/แก้ไขเมนู
   const cats = [...new Set(menuData.map(m => m.category))].filter(Boolean);
   let catOpts = '<option value="">-- เลือกหมวดหมู่ที่มีอยู่ --</option>';
   cats.forEach(c => {
@@ -1131,7 +1184,7 @@ async function loadMenu() {
       '<td>' + (m.available ? '<span style="color:green;">พร้อมขาย</span>' : '<span style="color:red;">หมด</span>') + '</td>' +
       '<td><button type="button" onclick="editMenu(' + m.id + ')">แก้ไข</button> <button type="button" onclick="delMenu(' + m.id + ')" style="color:red;">ลบ</button></td></tr>';
   });
-  $('menuTable').innerHTML = s;
+  if ($('menuTable')) $('menuTable').innerHTML = s;
 }
 
 function addNewCategoryPrompt() {
@@ -1161,7 +1214,6 @@ function editMenu(id) {
   const m = menuData.find(x => x.id === id);
   $('mId').value = m.id; $('mName').value = m.name; $('mPrice').value = m.price;
   
-  // ให้เลือกค่าหมวดหมู่เดิม (ถ้ายังไม่มีใน dropdown ให้เพิ่มเข้าไปชั่วคราว)
   const select = $('mCat');
   let found = false;
   for (let i = 0; i < select.options.length; i++) {
@@ -1180,11 +1232,7 @@ function editMenu(id) {
   $('mPlara').checked = !!m.hasPlaraOption;
   window.scrollTo({ top: 300, behavior: 'smooth' });
 }
-
-function resetMenuForm() { 
-  $('menuForm').reset(); 
-  $('mId').value = ''; 
-}
+function resetMenuForm() { $('menuForm').reset(); $('mId').value = ''; }
 
 async function submitMenuForm(e) {
   e.preventDefault();
@@ -1264,7 +1312,7 @@ async function renderCategoryOrderUI() {
           '</div></div>';
       });
     }
-    $('categoryOrderList').innerHTML = html;
+    if ($('categoryOrderList')) $('categoryOrderList').innerHTML = html;
   } catch(e) {}
 }
 
@@ -1275,7 +1323,6 @@ function moveCat(index, direction) {
   currentSettingsCatOrder[index] = currentSettingsCatOrder[target];
   currentSettingsCatOrder[target] = temp;
   
-  // เรนเดอร์หน้าจอตั้งค่าใหม่ทันที
   let html = '';
   currentSettingsCatOrder.forEach((cat, idx) => {
     html += '<div style="display:flex; justify-content:space-between; align-items:center; background:#fff; padding:6px 10px; margin:4px 0; border-radius:6px; border:1px solid #cbd5e1;">' +
@@ -1285,7 +1332,7 @@ function moveCat(index, direction) {
       (idx < currentSettingsCatOrder.length - 1 ? '<button type="button" onclick="moveCat(' + idx + ', 1)" style="padding:2px 8px;">⬇️ ลง</button>' : '') +
       '</div></div>';
   });
-  $('categoryOrderList').innerHTML = html;
+  if ($('categoryOrderList')) $('categoryOrderList').innerHTML = html;
 }
 
 async function deleteCategory() {
@@ -1310,9 +1357,7 @@ async function deleteCategory() {
 
 async function saveSettings() {
   try {
-    // เช็คค่าโลโก้ ถ้าไม่ได้กรอก ให้ใช้ค่าเดิมที่มีอยู่
     const logoVal = $('setLogo').value.trim();
-    
     const body = {
       theme: $('setTheme').value,
       shopName: $('setName').value,
@@ -1321,9 +1366,8 @@ async function saveSettings() {
       customAudio: $('setCustomAudio').value,
       soundVolume: $('setVol').value,
       loopInterval: $('setLoopInterval').value,
-      categoryOrder: currentSettingsCatOrder // ส่งค่าอาเรย์การเรียงหมวดหมู่ที่อัปเดตล่าสุดชัวร์ๆ
+      categoryOrder: currentSettingsCatOrder
     };
-    
     const res = await api('/api/settings', { method: 'PUT', body: body });
     document.documentElement.style.setProperty('--primary', res.theme);
     if ($('shopNameText')) $('shopNameText').textContent = res.shopName;
@@ -1351,7 +1395,7 @@ async function loadUsers() {
       (u.username !== me.username ? '<button type="button" data-u="' + esc(u.username) + '" onclick="delUser(this.dataset.u)" style="color:red;">ลบ</button>' : '<span class="muted">บัญชีของคุณ</span>') +
       '</td></tr>';
   });
-  $('userTable').innerHTML = s;
+  if ($('userTable')) $('userTable').innerHTML = s;
 }
 
 async function submitUserForm(e) {
