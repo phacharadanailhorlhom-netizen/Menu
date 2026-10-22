@@ -23,18 +23,13 @@ function checkPw(pw, stored) {
 
 let db = {
   users: [{ username: 'admin', password: hashPw('admin123'), role: 'admin' }],
-  menu: [
-    { id: 1, name: 'ข้าวผัดกะเพราหมู', price: 60, category: 'อาหารจานเดียว', image: 'https://images.unsplash.com/photo-1555126634-323283e090fa?w=500', available: true, recommended: true, hasPlaraOption: false },
-    { id: 2, name: 'ต้มยำกุ้ง', price: 120, category: 'ต้ม/แกง', image: 'https://images.unsplash.com/photo-1548943487-a2e4e43b4853?w=500', available: true, recommended: true, hasPlaraOption: false },
-    { id: 3, name: 'ชาเย็น', price: 35, category: 'เครื่องดื่ม', image: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=500', available: true, recommended: false, hasPlaraOption: false },
-    { id: 4, name: 'ส้มตำไทย', price: 50, category: 'ส้มตำ/ยำ', image: 'https://images.unsplash.com/photo-1626804475297-41608ea09aeb?w=500', available: true, recommended: true, hasPlaraOption: true },
-    { id: 5, name: 'ยำวุ้นเส้น', price: 60, category: 'ส้มตำ/ยำ', image: '', available: true, recommended: false, hasPlaraOption: true }
-  ],
+  menu: [], // <-- ลบเมนูตัวอย่างออกทั้งหมด เหลือแค่นี้
   orders: [],
   settings: { theme: '#e85d04', shopName: 'ร้านอาหารของเรา', logo: '', soundType: 'bell', customAudio: '', soundVolume: '1.0', loopInterval: '5' },
-  nextMenuId: 6,
+  nextMenuId: 1,  // เริ่มต้นไอดีเมนูที่ 1
   nextOrderId: 1
 };
+
 
 async function initStorage() {
   let loaded = false;
