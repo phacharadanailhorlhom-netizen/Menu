@@ -418,15 +418,19 @@ const SHOP_BODY = `
     <img class="shopLogo" hidden alt="Logo">
     <h1 id="shopNameText">🍜 ร้านอาหารของเรา</h1>
   </div>
-  <div class="sticky-category-bar">
   <label>โต๊ะ: <input id="table" size="4" onchange="localStorage.setItem('table', this.value); loadTableOrders();"></label>
 </header>
+
+<!-- ย้ายแถบหมวดหมู่ออกมาไว้ตรงนี้ เพื่อให้เกาะติดนิ่งๆ ใต้ Header ร้าน -->
+<div class="sticky-category-bar">
+  <div class="category-inner">
+    <input id="searchBox" placeholder="🔍 ค้นหาเมนูอาหาร..." style="margin-bottom:8px; background:#fff;">
+    <div id="catTabs" class="catTabs"></div>
+  </div>
+</div>
+
 <main class="layout">
   <section>
-    <input id="searchBox" placeholder="🔍 ค้นหาเมนูอาหาร..." style="margin-bottom:10px; background:#fff;">
-    
-      <div id="catTabs" class="catTabs"></div>
-    </div>
     <div id="menu"></div>
   </section>
   <aside class="panel">
@@ -440,12 +444,7 @@ const SHOP_BODY = `
   </aside>
 </main>
 <div id="plaraModal" class="modalOverlay" hidden>
-  <div class="modalBox">
-    <h3 style="margin-top:0;">🌶️ ต้องการใส่ปลาร้าไหม?</h3>
-    <p class="muted" id="plaraItemName" style="margin:4px 0 14px;"></p>
-    <button class="primary" onclick="confirmPlara('ใส่')">✅ ใส่ปลาร้า</button>
-    <button onclick="confirmPlara('ไม่ใส่')">🚫 ไม่ใส่ปลาร้า</button>
-  </div>
+  ...
 </div>
 `;
 
