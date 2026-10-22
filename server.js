@@ -679,7 +679,10 @@ const ADMIN_BODY = `
       <input type="hidden" id="mId">
       <input id="mName" placeholder="ชื่อเมนูอาหาร" required>
       <input id="mPrice" type="number" min="0" placeholder="ราคา (บาท)" required>
-      <input id="mCat" placeholder="หมวดหมู่ เช่น อาหารจานเดียว, ส้มตำ/ยำ" required>
+      <label style="display:block; margin-top:8px;">หมวดหมู่อาหาร:</label>
+      <select id="mCat" required style="margin:6px 0;">
+      <option value="">-- เลือกหมวดหมู่ที่มีอยู่ --</option>
+      </select>
       
       <label style="display:block; margin-top:8px;">อัปโหลดรูปภาพจากในเครื่อง หรือวางลิงก์:</label>
       <div style="display:flex; gap:8px; align-items:center;">
@@ -1076,6 +1079,15 @@ setInterval(loadOrders, 4000);
 
 async function loadMenu() {
   menuData = await api('/api/menu');
+  
+  // ดึงหมวดหมู่ทั้งหมดที่มีอยู่มาใส่ใน Dropdown เลือกหมวดหมู่
+  const cats = [...new Set(menuData.map(m => m.category))].filter(Boolean);
+  let catOpts = '<option value="">-- เลือกหมวดหมู่ที่มีอยู่ --</option>';
+  cats.forEach(c => {
+    catOpts += '<option value="' + esc(c) + '">' + esc(c) + '</option>';
+  });
+  if ($('mCat')) $('mCat').innerHTML = catOpts;
+
   let s = '<tr><th>รูป</th><th>ชื่อเมนู</th><th>ราคา</th><th>หมวด</th><th>สถานะ</th><th>จัดการ</th></tr>';
   menuData.forEach(m => {
     s += '<tr>' +
