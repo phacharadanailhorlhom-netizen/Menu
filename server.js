@@ -25,7 +25,7 @@ let db = {
   users: [{ username: 'admin', password: hashPw('admin123'), role: 'admin' }],
   menu: [], // <-- ลบเมนูตัวอย่างออกทั้งหมด เหลือแค่นี้
   orders: [],
-  settings: { theme: '#e85d04', shopName: 'ร้านอาหารของเรา', logo: '', soundType: 'bell', customAudio: '', soundVolume: '1.0', loopInterval: '5' },
+  settings: { theme: '#e85d04', shopName: 'เลยมาตำ', logo: '', soundType: 'bell', customAudio: '', soundVolume: '1.0', loopInterval: '5' },
   nextMenuId: 1,  // เริ่มต้นไอดีเมนูที่ 1
   nextOrderId: 1
 };
