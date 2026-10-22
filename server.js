@@ -411,7 +411,7 @@ const SHOP_BODY = `
 <header>
   <div class="brand">
     <img class="shopLogo" hidden alt="Logo">
-    <h1 id="shopNameText">🍜 ร้านอาหารของเรา</h1>
+    <h1 id="shopNameText">เลยมาตำ</h1>
   </div>
   <label>โต๊ะ: <input id="table" size="4" onchange="localStorage.setItem('table', this.value); loadTableOrders();"></label>
 </header>
