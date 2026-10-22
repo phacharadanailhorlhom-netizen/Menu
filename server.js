@@ -595,7 +595,7 @@ const ADMIN_BODY = `
 <header>
   <div class="brand">
     <img class="shopLogo" hidden alt="Logo">
-    <h1>🔐 ระบบหลังร้าน</h1>
+    <h1 style="font-size: 1.2rem; margin:0;">🔐 ระบบหลังร้าน</h1>
   </div>
   <span>
     <span id="who"></span> 
@@ -603,7 +603,7 @@ const ADMIN_BODY = `
     <button id="logoutBtn" type="button" hidden>ออกจากระบบ</button>
   </span>
 </header>
-<div id="loginBox" class="panel narrow">
+" class="panel narrow">
   <h2>เข้าสู่ระบบ</h2>
   <input id="u" placeholder="ชื่อผู้ใช้" autocapitalize="off" autocomplete="username">
   <input id="p" type="password" placeholder="รหัสผ่าน" autocomplete="current-password">
