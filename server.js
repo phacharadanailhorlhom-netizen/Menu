@@ -418,12 +418,13 @@ const SHOP_BODY = `
     <img class="shopLogo" hidden alt="Logo">
     <h1 id="shopNameText">🍜 ร้านอาหารของเรา</h1>
   </div>
+  <div class="sticky-category-bar">
   <label>โต๊ะ: <input id="table" size="4" onchange="localStorage.setItem('table', this.value); loadTableOrders();"></label>
 </header>
 <main class="layout">
   <section>
     <input id="searchBox" placeholder="🔍 ค้นหาเมนูอาหาร..." style="margin-bottom:10px; background:#fff;">
-    <div class="sticky-category-bar">
+    
       <div id="catTabs" class="catTabs"></div>
     </div>
     <div id="menu"></div>
