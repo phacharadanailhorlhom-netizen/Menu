@@ -865,13 +865,14 @@ function playSound(type, vol, customData) {
     const multiplier = Number(vol || 1.0);
     if (type === 'custom' && customData) {
       const audio = new Audio(customData);
+      window.currentActiveAudio = audio; // บันทึกไว้เผื่อกดหยุด
       audio.volume = Math.min(Math.max(multiplier * 0.5, 0.1), 1.0);
       audio.play().catch(() => {
         if ($('soundUnlockBar') && !soundUnlocked) $('soundUnlockBar').hidden = false;
       });
       return;
     }
-
+  
     const ctx = getCtx();
     const now = ctx.currentTime;
     const gainNode = ctx.createGain();
@@ -929,8 +930,27 @@ function stopLoopAlert() {
     clearInterval(loopAlertTimer);
     loopAlertTimer = null;
   }
+  // ✨ เพิ่มคำสั่งเคลียร์เสียงที่กำลังเล่นหรือแทร็กเสียงค้างอยู่ให้ตัดจบ
+  try {
+    if (window.currentActiveAudio) {
+      window.currentActiveAudio.pause();
+      window.currentActiveAudio.currentTime = 0;
+      window.currentActiveAudio = null;
+    }
+  } catch(e) {}
+
   if ($('stopAlertBtn')) $('stopAlertBtn').hidden = true;
   if ($('stopAlertBtn2')) $('stopAlertBtn2').hidden = true;
+}
+
+async function setStatus(btn) {
+  try { 
+    // ✨ เมื่อกดเปลี่ยนสถานะ (กดรับออเดอร์) ให้สั่งหยุดเสียงเตือนทันที
+    stopLoopAlert();
+
+    await api('/api/orders/' + btn.dataset.id, { method: 'PATCH', body: { status: btn.dataset.s } }); 
+    loadOrders(); 
+  } catch (e) { alert(e.message); }
 }
 
 function testSound() {
@@ -1255,6 +1275,7 @@ function moveCat(index, direction) {
   currentSettingsCatOrder[index] = currentSettingsCatOrder[target];
   currentSettingsCatOrder[target] = temp;
   
+  // เรนเดอร์หน้าจอตั้งค่าใหม่ทันที
   let html = '';
   currentSettingsCatOrder.forEach((cat, idx) => {
     html += '<div style="display:flex; justify-content:space-between; align-items:center; background:#fff; padding:6px 10px; margin:4px 0; border-radius:6px; border:1px solid #cbd5e1;">' +
@@ -1289,16 +1310,20 @@ async function deleteCategory() {
 
 async function saveSettings() {
   try {
+    // เช็คค่าโลโก้ ถ้าไม่ได้กรอก ให้ใช้ค่าเดิมที่มีอยู่
+    const logoVal = $('setLogo').value.trim();
+    
     const body = {
       theme: $('setTheme').value,
       shopName: $('setName').value,
-      logo: $('setLogo').value,
+      logo: logoVal,
       soundType: $('setSound').value,
       customAudio: $('setCustomAudio').value,
       soundVolume: $('setVol').value,
       loopInterval: $('setLoopInterval').value,
-      categoryOrder: currentSettingsCatOrder
+      categoryOrder: currentSettingsCatOrder // ส่งค่าอาเรย์การเรียงหมวดหมู่ที่อัปเดตล่าสุดชัวร์ๆ
     };
+    
     const res = await api('/api/settings', { method: 'PUT', body: body });
     document.documentElement.style.setProperty('--primary', res.theme);
     if ($('shopNameText')) $('shopNameText').textContent = res.shopName;
@@ -1314,7 +1339,8 @@ async function saveSettings() {
     window.currentLoopInterval = Number(res.loopInterval || '5') * 1000;
 
     alert('บันทึกการตั้งค่าสำเร็จ!');
-  } catch(e) { alert(e.message); }
+    loadSettingsForm();
+  } catch(e) { alert('บันทึกไม่สำเร็จ: ' + e.message); }
 }
 
 async function loadUsers() {
