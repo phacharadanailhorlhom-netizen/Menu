@@ -290,7 +290,7 @@ const CSS = `
 body { margin: 0; font-family: system-ui, sans-serif; background: #f8f9fa; color: #212529; }
 header { display: flex; justify-content: space-between; align-items: center; position: relative; padding: 12px 20px; background: var(--primary); color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,.1); }
 .brand { display: flex; align-items: center; gap: 12px; }
-.brand img { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; background: #fff; border: 2px solid rgba(255,255,255,.8); flex-shrink: 0; }
+.brand img { width: 65px; height: 65px; border-radius: 50%; object-fit: cover; background: #fff; border: 2px solid rgba(255,255,255,.8); flex-shrink: 0; }
 header h1 { margin: 0; font-size: 1.5rem; position: absolute; left: 50%; transform: translateX(-50%); text-align: center; white-space: nowrap; }
 @media (max-width: 450px) {
   header h1 { font-size: 1.3rem; } /* ปรับขนาดบนจอมือถือเล็กให้พอดีไม่ล้น */
@@ -415,7 +415,7 @@ const SHOP_BODY = `
   </div>
   <label>โต๊ะ: <input id="table" size="4" onchange="localStorage.setItem('table', this.value); loadTableOrders();"></label>
 </header>
-...
+
 
 
 <!-- ย้ายแถบหมวดหมู่ออกมาไว้ตรงนี้ เพื่อให้เกาะติดนิ่งๆ ใต้ Header ร้าน -->
