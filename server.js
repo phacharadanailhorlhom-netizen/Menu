@@ -288,13 +288,13 @@ const CSS = `
 :root { --primary: ${db.settings.theme}; }
 * { box-sizing: border-box; }
 body { margin: 0; font-family: system-ui, sans-serif; background: #f8f9fa; color: #212529; }
-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 20px; background: var(--primary); color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,.1); }
-.brand { display: flex; align-items: center; gap: 10px; }
-.brand img { width: 60px; height: 60px; border-radius: 50%; object-fit: cover; background: #fff; border: 2px solid rgba(255,255,255,.6); }
-header h1 { margin: 0; font-size: 1.3rem; }
-main, #app { padding: 16px; max-width: 1200px; margin: 0 auto; }
-.layout { display: grid; grid-template-columns: 1fr 380px; gap: 20px; align-items: start; }
-@media (max-width: 850px) { .layout { grid-template-columns: 1fr; } }
+header { display: flex; justify-content: space-between; align-items: center; position: relative; padding: 12px 20px; background: var(--primary); color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,.1); }
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand img { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; background: #fff; border: 2px solid rgba(255,255,255,.8); flex-shrink: 0; }
+header h1 { margin: 0; font-size: 1.5rem; position: absolute; left: 50%; transform: translateX(-50%); text-align: center; white-space: nowrap; }
+@media (max-width: 450px) {
+  header h1 { font-size: 1.3rem; } /* ปรับขนาดบนจอมือถือเล็กให้พอดีไม่ล้น */
+}
 
 /* แถบหมวดหมู่ติดด้านบนจอแบบ Sticky และเลื่อนปัดซ้าย-ขวาอิสระ */
 .sticky-category-bar {
@@ -411,10 +411,12 @@ const SHOP_BODY = `
 <header>
   <div class="brand">
     <img class="shopLogo" hidden alt="Logo">
-    <h1 id="shopNameText">เลยมาตำ</h1>
+    <h1 id="shopNameText" style="font-size: 1.6rem; font-weight: bold;">เลยมาตำ</h1>
   </div>
   <label>โต๊ะ: <input id="table" size="4" onchange="localStorage.setItem('table', this.value); loadTableOrders();"></label>
 </header>
+...
+
 
 <!-- ย้ายแถบหมวดหมู่ออกมาไว้ตรงนี้ เพื่อให้เกาะติดนิ่งๆ ใต้ Header ร้าน -->
 <div class="sticky-category-bar">
