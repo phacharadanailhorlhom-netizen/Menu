@@ -663,17 +663,6 @@ const ADMIN_BODY = `
     <div id="ordersContainer" class="grid"></div>
   </section>
 
-  <section id="menuTab" class="tab" hidden>
-    <form id="quickMenuForm" class="panel" style="margin-bottom:16px; background:#f8fafc; border:1px dashed var(--primary);" onsubmit="submitQuickMenu(event)">
-      <h3 style="margin-top:0; color:var(--primary);">⚡ เพิ่มเมนูด่วน (สำหรับร้านที่มีรายการเยอะ)</h3>
-      <div style="display:grid; grid-template-columns: 2fr 1fr 1.5fr auto; gap:8px; align-items:center;">
-        <input id="qName" placeholder="ชื่อเมนู" required style="margin:0;">
-        <input id="qPrice" type="number" min="0" placeholder="ราคา" required style="margin:0;">
-        <input id="qCat" placeholder="หมวดหมู่" required style="margin:0;">
-        <button type="submit" class="primary" style="margin:0; padding:10px 16px;">+ เพิ่มทันที</button>
-      </div>
-    </form>
-
     <form id="menuForm" class="panel" style="margin-bottom:20px;" onsubmit="submitMenuForm(event)">
       <h3>รายละเอียดและรูปภาพเมนู (แก้ไขแบบละเอียด)</h3>
       <input type="hidden" id="mId">
@@ -685,6 +674,7 @@ const ADMIN_BODY = `
       </select>
        <button type="button" onclick="addNewCategoryPrompt()" style="white-space:nowrap; padding:10px;">➕ เพิ่มหมวดใหม่</button>
       </div>
+      <p class="muted" style="font-size:0.8rem; margin:0 0 10px;">*การลบหมวดหมู่ จะทำให้เมนูทั้งหมดที่อยู่ในหมวดนั้นถูกเปลี่ยนเป็นหมวด "อื่นๆ"</p>
       
       <label style="display:block; margin-top:8px;">อัปโหลดรูปภาพจากในเครื่อง หรือวางลิงก์:</label>
       <div style="display:flex; gap:8px; align-items:center;">
@@ -953,6 +943,27 @@ function testSound() {
   playSound(t, v, ca);
 }
 
+async function deleteCategory() {
+  const catToDel = $('delCatSelect').value;
+  if (!catToDel) return alert('กรุณาเลือกหมวดหมู่ที่ต้องการลบ');
+  if (!confirm('ยืนยันการลบหมวดหมู่ "' + catToDel + '"? เมนูทั้งหมดในหมวดนี้จะถูกย้ายไปที่หมวด "อื่นๆ"')) return;
+
+  try {
+    // ดึงเมนูทั้งหมดมาเปลี่ยนหมวดหมู่ที่ตรงกันให้เป็น "อื่นๆ"
+    for (const m of menuData) {
+      if (m.category === catToDel) {
+        m.category = 'อื่นๆ';
+        await api('/api/menu/' + m.id, { method: 'PUT', body: m });
+      }
+    }
+    alert('ลบหมวดหมู่เรียบร้อยแล้ว');
+    loadMenu();
+    loadSettingsForm();
+  } catch(e) {
+    alert('เกิดข้อผิดพลาด: ' + e.message);
+  }
+}
+
 async function init() {
   try { me = await api('/api/me'); } catch (e) { me = null; localStorage.removeItem('token'); }
   $('loginBox').hidden = !!me;
@@ -1125,25 +1136,6 @@ async function loadMenu() {
       '<td><button type="button" onclick="editMenu(' + m.id + ')">แก้ไข</button> <button type="button" onclick="delMenu(' + m.id + ')" style="color:red;">ลบ</button></td></tr>';
   });
   $('menuTable').innerHTML = s;
-}
-
-async function submitQuickMenu(e) {
-  e.preventDefault();
-  const body = {
-    name: $('qName').value.trim(),
-    price: Number($('qPrice').value),
-    category: $('qCat').value.trim(),
-    image: '',
-    available: true,
-    recommended: false,
-    hasPlaraOption: false
-  };
-  try {
-    await api('/api/menu', { method: 'POST', body: body });
-    $('qName').value = ''; $('qPrice').value = '';
-    loadMenu();
-    alert('เพิ่มเมนูด่วนสำเร็จ!');
-  } catch(err) { alert(err.message); }
 }
 
 function editMenu(id) {
