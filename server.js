@@ -683,6 +683,8 @@ const ADMIN_BODY = `
       <select id="mCat" required style="margin:6px 0;">
       <option value="">-- เลือกหมวดหมู่ที่มีอยู่ --</option>
       </select>
+       <button type="button" onclick="addNewCategoryPrompt()" style="white-space:nowrap; padding:10px;">➕ เพิ่มหมวดใหม่</button>
+      </div>
       
       <label style="display:block; margin-top:8px;">อัปโหลดรูปภาพจากในเครื่อง หรือวางลิงก์:</label>
       <div style="display:flex; gap:8px; align-items:center;">
@@ -797,6 +799,31 @@ function handleFile(e) {
   const reader = new FileReader();
   reader.onload = function(evt) { $('mImg').value = evt.target.result; };
   reader.readAsDataURL(file);
+}
+
+function addNewCategoryPrompt() {
+  const newCat = prompt('กรอกชื่อหมวดหมู่ใหม่ที่ต้องการเพิ่ม:');
+  if (!newCat || !newCat.trim()) return;
+  const trimmedCat = newCat.trim();
+
+  // เช็คว่ามีหมวดหมู่นี้อยู่แล้วหรือยังใน Dropdown
+  const select = $('mCat');
+  let exists = false;
+  for (let i = 0; i < select.options.length; i++) {
+    if (select.options[i].value === trimmedCat) {
+      exists = true;
+      break;
+    }
+  }
+
+  // ถ้ายังไม่มี ให้สร้าง <option> ใหม่แล้วเลือกให้ทันที
+  if (!exists) {
+    const opt = document.createElement('option');
+    opt.value = trimmedCat;
+    opt.textContent = trimmedCat;
+    select.appendChild(opt);
+  }
+  select.value = trimmedCat;
 }
 
 function handleLogoFile(e) {
