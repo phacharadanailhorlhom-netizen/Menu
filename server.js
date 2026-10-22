@@ -506,6 +506,17 @@ function renderMenu(list) {
     else if (activeCat !== 'all') filtered = filtered.filter(m => m.category === activeCat);
   }
 
+  // ✨ เรียงลำดับรายการอาหารตามหมวดหมู่ที่แอดมินจัดเรียงไว้ในการตั้งค่า
+  filtered.sort((a, b) => {
+    let indexA = customCatOrder.indexOf(a.category);
+    let indexB = customCatOrder.indexOf(b.category);
+    if (indexA === -1) indexA = 999;
+    if (indexB === -1) indexB = 999;
+    if (indexA !== indexB) return indexA - indexB;
+    // ถ้าอยู่หมวดเดียวกัน ให้เรียงตามชื่อเมนูต่อ
+    return a.name.localeCompare(b.name, 'th');
+  });
+
   let out = '<div class="grid">';
   filtered.forEach(m => out += cardHtml(m));
   out += '</div>';
