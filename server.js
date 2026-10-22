@@ -1,4 +1,4 @@
-// ===== ระบบสั่งอาหารร้านค้า: JSONBin Sync, Admin Header Fix, จัดการหมวดหมู่แบบเลือก =====
+// ===== ระบบสั่งอาหารร้านค้า: JSONBin Sync, Admin Fixed, หมวดหมู่แบบเลือก =====
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -33,7 +33,7 @@ let db = {
     customAudio: '', 
     soundVolume: '1.0', 
     loopInterval: '5',
-    categoryOrder: [] // เก็บเป็นอาเรย์ของหมวดหมู่
+    categoryOrder: [] 
   },
   nextMenuId: 1,
   nextOrderId: 1
@@ -663,19 +663,21 @@ const ADMIN_BODY = `
     <div id="ordersContainer" class="grid"></div>
   </section>
 
+  <section id="menuTab" class="tab" hidden>
     <form id="menuForm" class="panel" style="margin-bottom:20px;" onsubmit="submitMenuForm(event)">
       <h3>รายละเอียดและรูปภาพเมนู (แก้ไขแบบละเอียด)</h3>
       <input type="hidden" id="mId">
       <input id="mName" placeholder="ชื่อเมนูอาหาร" required>
       <input id="mPrice" type="number" min="0" placeholder="ราคา (บาท)" required>
-      <label style="display:block; margin-top:8px;">หมวดหมู่อาหาร:</label>
-      <select id="mCat" required style="margin:6px 0;">
-      <option value="">-- เลือกหมวดหมู่ที่มีอยู่ --</option>
-      </select>
-       <button type="button" onclick="addNewCategoryPrompt()" style="white-space:nowrap; padding:10px;">➕ เพิ่มหมวดใหม่</button>
-      </div>
-      <p class="muted" style="font-size:0.8rem; margin:0 0 10px;">*การลบหมวดหมู่ จะทำให้เมนูทั้งหมดที่อยู่ในหมวดนั้นถูกเปลี่ยนเป็นหมวด "อื่นๆ"</p>
       
+      <label style="display:block; margin-top:8px;">หมวดหมู่อาหาร:</label>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <select id="mCat" required style="margin:6px 0; flex:1;">
+          <option value="">-- เลือกหมวดหมู่ที่มีอยู่ --</option>
+        </select>
+        <button type="button" onclick="addNewCategoryPrompt()" style="white-space:nowrap; padding:10px;">➕ เพิ่มหมวดใหม่</button>
+      </div>
+
       <label style="display:block; margin-top:8px;">อัปโหลดรูปภาพจากในเครื่อง หรือวางลิงก์:</label>
       <div style="display:flex; gap:8px; align-items:center;">
         <input type="file" id="mFile" accept="image/*" style="padding:6px;" onchange="handleFile(event)">
@@ -707,10 +709,19 @@ const ADMIN_BODY = `
       </div>
       <div style="margin-top:8px;"><img id="logoPreview" hidden style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:1px solid #e2e8f0;" alt="ตัวอย่างโลโก้"></div>
 
-      <label style="margin-top:10px; display:block;">จัดลำดับการแสดงหมวดหมู่ (ลากสลับหรือเลือกอันที่ต้องการให้ขึ้นก่อน):</label>
+      <label style="margin-top:10px; display:block;">จัดลำดับการแสดงหมวดหมู่:</label>
       <div id="categoryOrderList" style="background:#f1f5f9; padding:8px; border-radius:8px; margin-bottom:10px;">
         <p class="muted" style="margin:4px 0; font-size:0.9rem;">กำลังโหลดหมวดหมู่ที่มีในระบบ...</p>
       </div>
+
+      <label style="margin-top:10px; display:block; color:#dc2626;">จัดการลบหมวดหมู่:</label>
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+        <select id="delCatSelect" style="margin:0; flex:1;">
+          <option value="">-- เลือกหมวดหมู่ที่ต้องการลบ --</option>
+        </select>
+        <button type="button" onclick="deleteCategory()" style="background:#dc2626; color:#fff; border:none; padding:10px; white-space:nowrap;">🗑️ ลบหมวดนี้</button>
+      </div>
+      <p class="muted" style="font-size:0.8rem; margin:0 0 10px;">*การลบหมวดหมู่ จะทำให้เมนูทั้งหมดที่อยู่ในหมวดนั้นถูกเปลี่ยนเป็นหมวด "อื่นๆ"</p>
 
       <label style="margin-top:10px; display:block;">เลือกโทนสีหลักของร้าน:</label>
       <div style="display:flex; gap:10px; margin:8px 0;">
@@ -789,31 +800,6 @@ function handleFile(e) {
   const reader = new FileReader();
   reader.onload = function(evt) { $('mImg').value = evt.target.result; };
   reader.readAsDataURL(file);
-}
-
-function addNewCategoryPrompt() {
-  const newCat = prompt('กรอกชื่อหมวดหมู่ใหม่ที่ต้องการเพิ่ม:');
-  if (!newCat || !newCat.trim()) return;
-  const trimmedCat = newCat.trim();
-
-  // เช็คว่ามีหมวดหมู่นี้อยู่แล้วหรือยังใน Dropdown
-  const select = $('mCat');
-  let exists = false;
-  for (let i = 0; i < select.options.length; i++) {
-    if (select.options[i].value === trimmedCat) {
-      exists = true;
-      break;
-    }
-  }
-
-  // ถ้ายังไม่มี ให้สร้าง <option> ใหม่แล้วเลือกให้ทันที
-  if (!exists) {
-    const opt = document.createElement('option');
-    opt.value = trimmedCat;
-    opt.textContent = trimmedCat;
-    select.appendChild(opt);
-  }
-  select.value = trimmedCat;
 }
 
 function handleLogoFile(e) {
@@ -941,27 +927,6 @@ function testSound() {
   const v = $('setVol') ? $('setVol').value : '1.0';
   const ca = $('setCustomAudio') ? $('setCustomAudio').value : '';
   playSound(t, v, ca);
-}
-
-async function deleteCategory() {
-  const catToDel = $('delCatSelect').value;
-  if (!catToDel) return alert('กรุณาเลือกหมวดหมู่ที่ต้องการลบ');
-  if (!confirm('ยืนยันการลบหมวดหมู่ "' + catToDel + '"? เมนูทั้งหมดในหมวดนี้จะถูกย้ายไปที่หมวด "อื่นๆ"')) return;
-
-  try {
-    // ดึงเมนูทั้งหมดมาเปลี่ยนหมวดหมู่ที่ตรงกันให้เป็น "อื่นๆ"
-    for (const m of menuData) {
-      if (m.category === catToDel) {
-        m.category = 'อื่นๆ';
-        await api('/api/menu/' + m.id, { method: 'PUT', body: m });
-      }
-    }
-    alert('ลบหมวดหมู่เรียบร้อยแล้ว');
-    loadMenu();
-    loadSettingsForm();
-  } catch(e) {
-    alert('เกิดข้อผิดพลาด: ' + e.message);
-  }
 }
 
 async function init() {
@@ -1118,7 +1083,7 @@ setInterval(loadOrders, 4000);
 async function loadMenu() {
   menuData = await api('/api/menu');
   
-  // ดึงหมวดหมู่ทั้งหมดที่มีอยู่มาใส่ใน Dropdown เลือกหมวดหมู่
+  // อัปเดต Dropdown เลือกหมวดหมู่ในฟอร์มเพิ่ม/แก้ไขเมนู
   const cats = [...new Set(menuData.map(m => m.category))].filter(Boolean);
   let catOpts = '<option value="">-- เลือกหมวดหมู่ที่มีอยู่ --</option>';
   cats.forEach(c => {
@@ -1138,15 +1103,57 @@ async function loadMenu() {
   $('menuTable').innerHTML = s;
 }
 
+function addNewCategoryPrompt() {
+  const newCat = prompt('กรอกชื่อหมวดหมู่ใหม่ที่ต้องการเพิ่ม:');
+  if (!newCat || !newCat.trim()) return;
+  const trimmedCat = newCat.trim();
+
+  const select = $('mCat');
+  let exists = false;
+  for (let i = 0; i < select.options.length; i++) {
+    if (select.options[i].value === trimmedCat) {
+      exists = true;
+      break;
+    }
+  }
+
+  if (!exists) {
+    const opt = document.createElement('option');
+    opt.value = trimmedCat;
+    opt.textContent = trimmedCat;
+    select.appendChild(opt);
+  }
+  select.value = trimmedCat;
+}
+
 function editMenu(id) {
   const m = menuData.find(x => x.id === id);
   $('mId').value = m.id; $('mName').value = m.name; $('mPrice').value = m.price;
-  $('mCat').value = m.category; $('mImg').value = m.image || ''; 
+  
+  // ให้เลือกค่าหมวดหมู่เดิม (ถ้ายังไม่มีใน dropdown ให้เพิ่มเข้าไปชั่วคราว)
+  const select = $('mCat');
+  let found = false;
+  for (let i = 0; i < select.options.length; i++) {
+    if (select.options[i].value === m.category) { found = true; break; }
+  }
+  if (!found && m.category) {
+    const opt = document.createElement('option');
+    opt.value = m.category;
+    opt.textContent = m.category;
+    select.appendChild(opt);
+  }
+  select.value = m.category || '';
+
+  $('mImg').value = m.image || ''; 
   $('mAvail').checked = m.available; $('mRec').checked = !!m.recommended;
   $('mPlara').checked = !!m.hasPlaraOption;
   window.scrollTo({ top: 300, behavior: 'smooth' });
 }
-function resetMenuForm() { $('menuForm').reset(); $('mId').value = ''; }
+
+function resetMenuForm() { 
+  $('menuForm').reset(); 
+  $('mId').value = ''; 
+}
 
 async function submitMenuForm(e) {
   e.preventDefault();
@@ -1158,13 +1165,14 @@ async function submitMenuForm(e) {
     else await api('/api/menu', { method: 'POST', body: body });
     resetMenuForm();
     loadMenu();
+    loadSettingsForm();
     alert('บันทึกเมนูสำเร็จ!');
   } catch (err) { alert(err.message); }
 }
 
 async function delMenu(id) {
   if (!confirm('ต้องการลบเมนูนี้ใช่หรือไม่?')) return;
-  try { await api('/api/menu/' + id, { method: 'DELETE' }); loadMenu(); } catch (e) { alert(e.message); }
+  try { await api('/api/menu/' + id, { method: 'DELETE' }); loadMenu(); loadSettingsForm(); } catch (e) { alert(e.message); }
 }
 
 let currentSettingsCatOrder = [];
@@ -1199,16 +1207,20 @@ async function loadSettingsForm() {
 async function renderCategoryOrderUI() {
   try {
     const menuList = await api('/api/menu');
-    const allCats = [...new Set(menuList.map(m => m.category))];
+    const allCats = [...new Set(menuList.map(m => m.category))].filter(Boolean);
     
-    // จัดเรียงตามค่าเดิมที่เซฟไว้ หรือเอาอันที่ยังไม่มีไว้ข้างหลัง
     let ordered = [...currentSettingsCatOrder];
     allCats.forEach(c => { if (!ordered.includes(c)) ordered.push(c); });
-    // กรองเอาเฉพาะหมวดที่มีอยู่จริงในระบบตอนนี้
     ordered = ordered.filter(c => allCats.includes(c));
     currentSettingsCatOrder = ordered;
 
     let html = '';
+    let delOpts = '<option value="">-- เลือกหมวดหมู่ที่ต้องการลบ --</option>';
+    allCats.forEach(c => {
+      delOpts += '<option value="' + esc(c) + '">' + esc(c) + '</option>';
+    });
+    if ($('delCatSelect')) $('delCatSelect').innerHTML = delOpts;
+
     if (!ordered.length) {
       html = '<p class="muted" style="margin:4px 0; font-size:0.9rem;">ยังไม่มีหมวดหมู่ในระบบ (ให้เพิ่มเมนูก่อน)</p>';
     } else {
@@ -1232,7 +1244,6 @@ function moveCat(index, direction) {
   currentSettingsCatOrder[index] = currentSettingsCatOrder[target];
   currentSettingsCatOrder[target] = temp;
   
-  // เรนเดอร์หน้าจอตั้งค่าใหม่ทันที
   let html = '';
   currentSettingsCatOrder.forEach((cat, idx) => {
     html += '<div style="display:flex; justify-content:space-between; align-items:center; background:#fff; padding:6px 10px; margin:4px 0; border-radius:6px; border:1px solid #cbd5e1;">' +
@@ -1243,6 +1254,26 @@ function moveCat(index, direction) {
       '</div></div>';
   });
   $('categoryOrderList').innerHTML = html;
+}
+
+async function deleteCategory() {
+  const catToDel = $('delCatSelect').value;
+  if (!catToDel) return alert('กรุณาเลือกหมวดหมู่ที่ต้องการลบ');
+  if (!confirm('ยืนยันการลบหมวดหมู่ "' + catToDel + '"? เมนูทั้งหมดในหมวดนี้จะถูกย้ายไปที่หมวด "อื่นๆ"')) return;
+
+  try {
+    for (const m of menuData) {
+      if (m.category === catToDel) {
+        m.category = 'อื่นๆ';
+        await api('/api/menu/' + m.id, { method: 'PUT', body: m });
+      }
+    }
+    alert('ลบหมวดหมู่เรียบร้อยแล้ว');
+    loadMenu();
+    loadSettingsForm();
+  } catch(e) {
+    alert('เกิดข้อผิดพลาด: ' + e.message);
+  }
 }
 
 async function saveSettings() {
@@ -1289,7 +1320,7 @@ async function loadUsers() {
 async function submitUserForm(e) {
   e.preventDefault();
   try {
-    await api('/api/users', { method: 'POST', body: { username: $('nu').value.trim(), password: $('p').value, role: $('nr').value } });
+    await api('/api/users', { method: 'POST', body: { username: $('nu').value.trim(), password: $('np').value, role: $('nr').value } });
     $('userForm').reset();
     loadUsers();
     alert('เพิ่มผู้ใช้สำเร็จ!');
