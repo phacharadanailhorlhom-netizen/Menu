@@ -1382,18 +1382,39 @@ function renderMenuToppingsCheckboxes() {
   toppingsData.forEach(t => { const c = t.category || 'ท็อปปิ้งทั่วไป'; (byCat[c] = byCat[c] || []).push(t); });
   let html = '';
   Object.keys(byCat).forEach(cat => {
-    html += '<p style="margin:8px 0 2px; font-size:0.85rem; font-weight:bold; color:#0891b2;">📂 ' + esc(cat) + '</p>';
-    html += byCat[cat].map(t =>
-      '<label style="display:flex; align-items:center; gap:8px; padding:4px 0;"><input type="checkbox" value="' + t.id + '" ' +
+    const catItems = byCat[cat];
+    const allChecked = catItems.every(t => selectedMenuToppings.includes(t.id));
+    html += '<div style="margin:6px 0; border-bottom:1px dashed #cbd5e1; padding-bottom:4px;">' +
+      '<label style="display:flex; align-items:center; gap:8px; font-weight:bold; color:#0891b2; cursor:pointer; background:#e0f2fe; padding:4px 8px; border-radius:4px;">' +
+      '<input type="checkbox" ' + (allChecked && catItems.length > 0 ? 'checked' : '') + ' onchange="toggleMenuToppingCategory(\\'' + esc(cat).replace(/'/g, "\\\\'") + '\\', this.checked)"> ' +
+      '📂 ' + esc(cat) + ' (เลือกทั้งหมด)</label>';
+    html += '<div style="padding-left:16px; margin-top:4px;">';
+    html += catItems.map(t =>
+      '<label style="display:flex; align-items:center; gap:8px; padding:3px 0; font-weight:normal; color:#212529;"><input type="checkbox" value="' + t.id + '" ' +
       (selectedMenuToppings.includes(t.id) ? 'checked' : '') + ' onchange="toggleMenuTopping(' + t.id + ', this.checked)"> ' +
       esc(t.name) + ' (+' + t.price + ' บาท)</label>'
     ).join('');
+    html += '</div></div>';
   });
   el.innerHTML = html;
 }
+
+function toggleMenuToppingCategory(cat, checked) {
+  const catToppings = toppingsData.filter(t => (t.category || 'ท็อปปิ้งทั่วไป') === cat);
+  catToppings.forEach(t => {
+    if (checked) {
+      if (!selectedMenuToppings.includes(t.id)) selectedMenuToppings.push(t.id);
+    } else {
+      selectedMenuToppings = selectedMenuToppings.filter(id => id !== t.id);
+    }
+  });
+  renderMenuToppingsCheckboxes();
+}
+
 function toggleMenuTopping(id, checked) {
   if (checked) { if (!selectedMenuToppings.includes(id)) selectedMenuToppings.push(id); }
   else { selectedMenuToppings = selectedMenuToppings.filter(x => x !== id); }
+  renderMenuToppingsCheckboxes();
 }
 
 async function loadMenu() {
