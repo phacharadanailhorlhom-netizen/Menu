@@ -1,4 +1,4 @@
-// ===== ระบบสั่งอาหารร้านค้า: JSONBin Sync, Table Management, Spice Level, Toppings =====
+// ===== ระบบสั่งอาหารร้านค้า: JSONBin Sync, Table Management, Spice/Plara แยกอิสระ, Toppings =====
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -28,7 +28,7 @@ let db = {
   menu: [],
   orders: [],
   tables: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
-  toppings: [], // รายการท็อปปิ้งที่แอดมินเพิ่มได้ { id, name, price }
+  toppings: [],
   settings: { 
     theme: '#e85d04', 
     shopName: 'เลยมาตำ', 
@@ -84,6 +84,7 @@ async function initStorage() {
 
   db.menu.forEach(m => { 
     if (m.hasPlaraOption === undefined) m.hasPlaraOption = false; 
+    if (m.hasSpiceOption === undefined) m.hasSpiceOption = !!m.hasPlaraOption; // migrate ของเดิมที่เคยผูกกัน
     if (!Array.isArray(m.toppings)) m.toppings = [];
   });
   save();
@@ -139,6 +140,7 @@ function cleanMenu(b) {
     available: b.available !== false,
     recommended: !!b.recommended,
     hasPlaraOption: !!b.hasPlaraOption,
+    hasSpiceOption: !!b.hasSpiceOption,
     toppings: toppingIds
   };
 }
@@ -169,7 +171,6 @@ const server = http.createServer(async (req, res) => {
     };
     const [, part, id] = p.split('/').filter(Boolean);
 
-    // API จัดการโต๊ะ
     if (part === 'tables') {
       if (method === 'GET') return send(res, 200, db.tables);
       if (!need('admin')) return;
@@ -190,7 +191,6 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    // API จัดการท็อปปิ้ง
     if (part === 'toppings') {
       if (method === 'GET') return send(res, 200, db.toppings);
       if (!need('admin')) return;
@@ -276,19 +276,19 @@ const server = http.createServer(async (req, res) => {
           let plara = null, spice = null;
           if (mm.hasPlaraOption) {
             plara = (it.plara === 'ไม่ใส่' || it.plara === 'ใส่') ? it.plara : null;
+            if (!plara) return send(res, 400, { error: 'กรุณาเลือกใส่/ไม่ใส่ปลาร้าก่อนสั่งเมนู "' + mm.name + '"' });
+          }
+          if (mm.hasSpiceOption) {
             spice = SPICE_LEVELS.includes(it.spice) ? it.spice : null;
-            if (!plara || !spice) {
-              return send(res, 400, { error: 'กรุณาเลือกปลาร้าและระดับความเผ็ดให้ครบก่อนสั่งเมนู "' + mm.name + '"' });
-            }
+            if (!spice) return send(res, 400, { error: 'กรุณาเลือกระดับความเผ็ดก่อนสั่งเมนู "' + mm.name + '"' });
           }
 
           const selectedToppingIds = Array.isArray(it.toppings) ? it.toppings.map(Number) : [];
           const toppingLines = [];
-          let toppingsTotal = 0;
           selectedToppingIds.forEach(tid => {
             if ((mm.toppings || []).includes(tid)) {
               const t = db.toppings.find(x => x.id === tid);
-              if (t) { toppingLines.push({ id: t.id, name: t.name, price: t.price }); toppingsTotal += t.price; }
+              if (t) toppingLines.push({ id: t.id, name: t.name, price: t.price });
             }
           });
 
@@ -384,41 +384,11 @@ header { display: flex; justify-content: space-between; align-items: center; pad
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand img { width: 55px; height: 55px; border-radius: 50%; object-fit: cover; background: #fff; border: 2px solid rgba(255,255,255,.8); flex-shrink: 0; }
 header h1 { margin: 0; font-size: 1.2rem; font-weight: bold; white-space: nowrap; }
-
-.sticky-category-bar {
-  position: sticky;
-  top: 0;
-  z-index: 99;
-  background: #f8f9fa;
-  padding: 8px 0;
-  margin-bottom: 12px;
-  border-bottom: 1px solid #e2e8f0;
-}
-.catTabs {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding-bottom: 2px;
-}
-.catTabs::-webkit-scrollbar {
-  display: none;
-}
-.catTabs button {
-  white-space: nowrap;
-  background: #e2e8f0;
-  border: none;
-  flex-shrink: 0;
-  padding: 6px 14px;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  cursor: pointer;
-}
-.catTabs button.active {
-  background: var(--primary);
-  color: #fff;
-}
-
+.sticky-category-bar { position: sticky; top: 0; z-index: 99; background: #f8f9fa; padding: 8px 0; margin-bottom: 12px; border-bottom: 1px solid #e2e8f0; }
+.catTabs { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.catTabs::-webkit-scrollbar { display: none; }
+.catTabs button { white-space: nowrap; background: #e2e8f0; border: none; flex-shrink: 0; padding: 6px 14px; border-radius: 8px; font-size: 0.9rem; cursor: pointer; }
+.catTabs button.active { background: var(--primary); color: #fff; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
 .card, .panel { background: #fff; border-radius: 12px; padding: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.06); border: 1px solid #edf2f7; }
 .card img { width: 100%; height: 120px; object-fit: cover; border-radius: 8px; background: #eee; }
@@ -443,7 +413,7 @@ th { background: #f1f5f9; }
 .badge.served { background: #10b981; } .badge.cancelled { background: #64748b; }
 .tag-rec { background: #ef4444; color: #fff; font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; display: inline-block; margin-bottom: 4px; }
 .tag-plara { background: #7c3aed; color: #fff; font-size: 0.7rem; padding: 2px 7px; border-radius: 8px; display: inline-block; margin-left: 4px; }
-.tag-spice { background: #ea580c; color: #fff; font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; display: inline-block; margin-left: 4px; }
+.tag-spice { background: #ea580c; color: #fff; font-size: 0.7rem; padding: 2px 7px; border-radius: 8px; display: inline-block; margin-left: 4px; }
 .tag-topping { background: #0891b2; color: #fff; font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; display: inline-block; margin: 2px 4px 0 0; }
 [hidden] { display: none !important; }
 @keyframes pulseOrder { 0% { box-shadow: 0 0 0 0 rgba(245,158,11,.55); } 70% { box-shadow: 0 0 0 10px rgba(245,158,11,0); } 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0); } }
@@ -488,17 +458,10 @@ async function loadSettings() {
     const s = await api('/api/settings');
     if (s.theme) document.documentElement.style.setProperty('--primary', s.theme);
     if (s.shopName && $('shopNameText')) $('shopNameText').textContent = s.shopName;
-    if (Array.isArray(s.categoryOrder)) {
-      customCatOrder = s.categoryOrder;
-    }
+    if (Array.isArray(s.categoryOrder)) customCatOrder = s.categoryOrder;
     document.querySelectorAll('.shopLogo').forEach(img => {
-      if (s.logo && s.logo.trim() !== '') {
-        img.onerror = function () { img.hidden = true; };
-        img.src = s.logo;
-        img.hidden = false;
-      } else {
-        img.hidden = true;
-      }
+      if (s.logo && s.logo.trim() !== '') { img.onerror = function () { img.hidden = true; }; img.src = s.logo; img.hidden = false; }
+      else { img.hidden = true; }
     });
     window.currentSoundType = s.soundType || 'bell';
     window.currentCustomAudio = s.customAudio || '';
@@ -544,13 +507,15 @@ const SHOP_BODY = `
     <button type="button" class="modalCloseBtn" onclick="closePlaraModal()">✕</button>
     <h3 style="margin-top:0;">🍲 <span id="plaraItemName"></span></h3>
 
-    <div id="plaraSection" hidden>
-      <p class="muted" style="margin:10px 0 4px; text-align:left;">🌶️ ต้องการใส่ปลาร้าไหม? (บังคับเลือก)</p>
+    <div id="plaraOnlySection" hidden>
+      <p class="muted" style="margin:10px 0 4px; text-align:left;">🐟 ต้องการใส่ปลาร้าไหม? (บังคับเลือก)</p>
       <div class="choiceGroup" id="plaraChoiceGroup">
         <button type="button" data-v="ใส่" onclick="choosePlara('ใส่')">✅ ใส่ปลาร้า</button>
         <button type="button" data-v="ไม่ใส่" onclick="choosePlara('ไม่ใส่')">🚫 ไม่ใส่ปลาร้า</button>
       </div>
+    </div>
 
+    <div id="spiceOnlySection" hidden>
       <p class="muted" style="margin:10px 0 4px; text-align:left;">🔥 ระดับความเผ็ด (บังคับเลือก)</p>
       <div class="choiceGroup" id="spiceChoiceGroup">
         <button type="button" data-v="ไม่พริก" onclick="chooseSpice('ไม่พริก')">ไม่พริก</button>
@@ -598,7 +563,6 @@ function renderCatTabs() {
     if (indexB === -1) indexB = 999;
     return indexA - indexB;
   });
-
   let out = '<button type="button" class="' + (activeCat === 'all' ? 'active' : '') + '" onclick="setCat(\\'all\\')">ทั้งหมด</button>';
   out += '<button type="button" class="' + (activeCat === 'rec' ? 'active' : '') + '" onclick="setCat(\\'rec\\')">🌟 แนะนำ</button>';
   cats.forEach(c => {
@@ -607,21 +571,15 @@ function renderCatTabs() {
   $('catTabs').innerHTML = out;
 }
 
-function setCat(cat) {
-  activeCat = cat;
-  renderCatTabs();
-  renderMenu(menu);
-}
+function setCat(cat) { activeCat = cat; renderCatTabs(); renderMenu(menu); }
 
 function renderMenu(list) {
   const keyword = ($('searchBox').value || '').toLowerCase().trim();
   let filtered = list.filter(m => m.available && (!keyword || m.name.toLowerCase().includes(keyword) || m.category.toLowerCase().includes(keyword)));
-
   if (!keyword) {
     if (activeCat === 'rec') filtered = filtered.filter(m => m.recommended);
     else if (activeCat !== 'all') filtered = filtered.filter(m => m.category === activeCat);
   }
-
   filtered.sort((a, b) => {
     let indexA = customCatOrder.indexOf(a.category);
     let indexB = customCatOrder.indexOf(b.category);
@@ -630,11 +588,9 @@ function renderMenu(list) {
     if (indexA !== indexB) return indexA - indexB;
     return a.name.localeCompare(b.name, 'th');
   });
-
   let out = '<div class="grid">';
   filtered.forEach(m => out += cardHtml(m));
   out += '</div>';
-
   $('menu').innerHTML = filtered.length ? out : '<p>ไม่พบเมนูอาหารที่คุณค้นหา</p>';
   renderCart();
 }
@@ -643,7 +599,8 @@ function cardHtml(m) {
   return '<div class="card">' +
     (m.image ? '<img src="' + esc(m.image) + '" alt="" onerror="this.style.display=\\'none\\'"> ' : '<div style="height:120px;background:#f1f5f9;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:0.9rem;">ไม่มีรูปภาพ</div>') +
     (m.recommended ? '<span class="tag-rec">แนะนำ</span>' : '') +
-    (m.hasPlaraOption ? '<span class="tag-plara">มีปลาร้า/เผ็ดเลือกได้</span>' : '') +
+    (m.hasPlaraOption ? '<span class="tag-plara">ปลาร้าเลือกได้</span>' : '') +
+    (m.hasSpiceOption ? '<span class="tag-spice">เผ็ดเลือกได้</span>' : '') +
     '<h3>' + esc(m.name) + '</h3><p style="color:var(--primary); font-weight:bold; margin:4px 0;">' + m.price + ' บาท</p>' +
     '<button class="primary" style="margin-top:6px; padding:8px;" onclick="add(' + m.id + ')">+ เพิ่มใส่ตะกร้า</button></div>';
 }
@@ -654,14 +611,15 @@ function add(id) {
   const m = menu.find(x => x.id === id);
   if (!m) return;
   const hasToppings = (m.toppings || []).length > 0;
-  if (m.hasPlaraOption || hasToppings) {
+  if (m.hasPlaraOption || m.hasSpiceOption || hasToppings) {
     pendingAddId = id;
     pendingPlara = null;
     pendingSpice = null;
     pendingToppings = [];
     $('plaraItemName').textContent = m.name;
 
-    $('plaraSection').hidden = !m.hasPlaraOption;
+    $('plaraOnlySection').hidden = !m.hasPlaraOption;
+    $('spiceOnlySection').hidden = !m.hasSpiceOption;
     document.querySelectorAll('#plaraChoiceGroup button').forEach(b => b.classList.remove('selected'));
     document.querySelectorAll('#spiceChoiceGroup button').forEach(b => b.classList.remove('selected'));
 
@@ -683,10 +641,7 @@ function add(id) {
   doAdd(id, null, null, []);
 }
 
-function closePlaraModal() {
-  $('plaraModal').hidden = true;
-  pendingAddId = null;
-}
+function closePlaraModal() { $('plaraModal').hidden = true; pendingAddId = null; }
 
 function choosePlara(v) {
   pendingPlara = v;
@@ -704,18 +659,17 @@ function toggleTopping(id, checked) {
 }
 function updateConfirmState() {
   const m = menu.find(x => x.id === pendingAddId);
-  const needPlara = m && m.hasPlaraOption;
-  const ok = !needPlara || (pendingPlara && pendingSpice);
-  $('confirmAddBtn').disabled = !ok;
+  if (!m) return;
+  const plaraOk = !m.hasPlaraOption || !!pendingPlara;
+  const spiceOk = !m.hasSpiceOption || !!pendingSpice;
+  $('confirmAddBtn').disabled = !(plaraOk && spiceOk);
 }
 
 function confirmAdd() {
   if (pendingAddId == null) return;
   const m = menu.find(x => x.id === pendingAddId);
-  if (m && m.hasPlaraOption && (!pendingPlara || !pendingSpice)) {
-    alert('กรุณาเลือกปลาร้าและระดับความเผ็ดให้ครบก่อนนะครับ');
-    return;
-  }
+  if (m && m.hasPlaraOption && !pendingPlara) { alert('กรุณาเลือกใส่/ไม่ใส่ปลาร้าก่อนนะครับ'); return; }
+  if (m && m.hasSpiceOption && !pendingSpice) { alert('กรุณาเลือกระดับความเผ็ดก่อนนะครับ'); return; }
   doAdd(pendingAddId, pendingPlara, pendingSpice, pendingToppings.slice());
   $('plaraModal').hidden = true;
   pendingAddId = null;
@@ -726,14 +680,8 @@ function doAdd(id, plara, spice, toppingIds) {
   else { cart[id].qty++; }
   renderCart();
 }
-function changeQty(id, d) {
-  cart[id].qty += d;
-  if (cart[id].qty <= 0) delete cart[id];
-  renderCart();
-}
-function changeNote(id, val) {
-  if (cart[id]) cart[id].note = val;
-}
+function changeQty(id, d) { cart[id].qty += d; if (cart[id].qty <= 0) delete cart[id]; renderCart(); }
+function changeNote(id, val) { if (cart[id]) cart[id].note = val; }
 
 function renderCart() {
   let total = 0, out = '';
@@ -743,11 +691,16 @@ function renderCart() {
     const toppingItems = (cart[id].toppings || []).map(tid => toppingsData.find(t => t.id === tid)).filter(Boolean);
     const toppingSum = toppingItems.reduce((s, t) => s + t.price, 0);
     total += (m.price + toppingSum) * cart[id].qty;
+
+    let tagLine = '';
+    if (cart[id].plara) tagLine += '🐟 ' + esc(cart[id].plara) + 'ปลาร้า';
+    if (cart[id].spice) tagLine += (tagLine ? ' · ' : '') + '🔥 ' + esc(cart[id].spice);
+
     out += '<div style="border-bottom:1px solid #edf2f7; padding:8px 0;">' +
       '<div class="row"><span><b>' + esc(m.name) + '</b></span><span>' +
       '<button onclick="changeQty(' + id + ',-1)">−</button> ' + cart[id].qty + ' ' +
       '<button onclick="changeQty(' + id + ',1)">+</button></span></div>' +
-      (cart[id].plara ? '<div style="font-size:0.8rem; color:#7c3aed;">🌶️ ' + esc(cart[id].plara) + 'ปลาร้า' + (cart[id].spice ? ' · ' + esc(cart[id].spice) : '') + '</div>' : '') +
+      (tagLine ? '<div style="font-size:0.8rem; color:#7c3aed;">' + tagLine + '</div>' : '') +
       (toppingItems.length ? '<div style="margin:4px 0;">' + toppingItems.map(t => '<span class="tag-topping">' + esc(t.name) + '</span>').join('') + '</div>' : '') +
       '<input placeholder="หมายเหตุเฉพาะเมนูนี้ เช่น ไม่ใส่ผัก" value="' + esc(cart[id].note) + '" oninput="changeNote(' + id + ', this.value)" style="margin:4px 0 0; padding:6px; font-size:0.85rem;">' +
       '</div>';
@@ -779,8 +732,11 @@ async function loadTableOrders() {
     $('myTableOrders').innerHTML = orders.map(o => {
       let s = '<div style="border-bottom:1px dashed #eee; padding:8px 0;"><div class="row"><span><b>#' + o.id + '</b> (' + o.total + '฿)</span><span class="badge ' + o.status + '">' + STATUS[o.status] + '</span></div><ul style="margin:4px 0; padding-left:18px; font-size:0.9rem;">';
       o.items.forEach(i => {
+        let tagLine = '';
+        if (i.plara) tagLine += esc(i.plara) + 'ปลาร้า';
+        if (i.spice) tagLine += (tagLine ? ' · ' : '') + esc(i.spice);
         s += '<li>' + esc(i.name) + ' × <b>' + i.qty + '</b>' +
-          (i.plara ? ' <span style="color:#7c3aed;">(' + esc(i.plara) + 'ปลาร้า · ' + esc(i.spice) + ')</span>' : '') +
+          (tagLine ? ' <span style="color:#7c3aed;">(' + tagLine + ')</span>' : '') +
           ((i.toppings && i.toppings.length) ? ' <span style="color:#0891b2;">[' + i.toppings.map(t => esc(t.name)).join(', ') + ']</span>' : '') +
           (i.note ? ' <span class="muted">(' + esc(i.note) + ')</span>' : '') + '</li>';
       });
@@ -884,7 +840,8 @@ const ADMIN_BODY = `
       <div style="display:flex; gap:20px; margin:12px 0; flex-wrap:wrap;">
         <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mAvail" checked> เปิดขายเมนูนี้</label>
         <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mRec"> 🌟 ตั้งเป็นเมนูแนะนำ (ขึ้นโชว์ด้านบน)</label>
-        <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mPlara"> 🌶️ มีตัวเลือกใส่/ไม่ใส่ปลาร้า + ระดับความเผ็ด</label>
+        <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mPlara"> 🐟 มีตัวเลือกใส่/ไม่ใส่ปลาร้า</label>
+        <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mSpice"> 🌶️ มีตัวเลือกระดับความเผ็ด</label>
       </div>
 
       <label style="display:block; margin-top:8px;">➕ ท็อปปิ้งที่เลือกได้สำหรับเมนูนี้ (ไม่บังคับ):</label>
@@ -1017,7 +974,6 @@ function handleFile(e) {
   reader.onload = function(evt) { $('mImg').value = evt.target.result; };
   reader.readAsDataURL(file);
 }
-
 function handleLogoFile(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -1029,18 +985,13 @@ function handleLogoFile(e) {
   };
   reader.readAsDataURL(file);
 }
-
 function handleAudioFile(e) {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = function(evt) { 
-    $('setCustomAudio').value = evt.target.result; 
-    $('setSound').value = 'custom';
-  };
+  reader.onload = function(evt) { $('setCustomAudio').value = evt.target.result; $('setSound').value = 'custom'; };
   reader.readAsDataURL(file);
 }
-
 function getCtx() {
   if (!sharedAudioCtx) {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -1049,7 +1000,6 @@ function getCtx() {
   if (sharedAudioCtx.state === 'suspended') sharedAudioCtx.resume().catch(()=>{});
   return sharedAudioCtx;
 }
-
 function enableSound() {
   try {
     getCtx();
@@ -1064,7 +1014,6 @@ function enableSound() {
     playSound(window.currentSoundType, window.currentSoundVol, window.currentCustomAudio);
   } catch(e) {}
 }
-
 function playSound(type, vol, customData) {
   try {
     const multiplier = Number(vol || 1.0);
@@ -1072,16 +1021,12 @@ function playSound(type, vol, customData) {
       const audio = new Audio(customData);
       window.currentActiveAudio = audio;
       audio.volume = Math.min(Math.max(multiplier * 0.5, 0.1), 1.0);
-      audio.play().catch(() => {
-        if ($('soundUnlockBar') && !soundUnlocked) $('soundUnlockBar').hidden = false;
-      });
+      audio.play().catch(() => { if ($('soundUnlockBar') && !soundUnlocked) $('soundUnlockBar').hidden = false; });
       return;
     }
-
     const ctx = getCtx();
     const now = ctx.currentTime;
     const gainNode = ctx.createGain();
-
     if (type === 'beep') {
       const osc = ctx.createOscillator();
       osc.type = 'square';
@@ -1115,37 +1060,23 @@ function playSound(type, vol, customData) {
     }
     if ($('soundUnlockBar')) $('soundUnlockBar').hidden = true;
     soundUnlocked = true;
-  } catch(e) {
-    if ($('soundUnlockBar') && !soundUnlocked) $('soundUnlockBar').hidden = false;
-  }
+  } catch(e) { if ($('soundUnlockBar') && !soundUnlocked) $('soundUnlockBar').hidden = false; }
 }
-
 function startLoopAlert() {
   playSound(window.currentSoundType, window.currentSoundVol, window.currentCustomAudio);
   if (loopAlertTimer) return;
-  loopAlertTimer = setInterval(() => {
-    playSound(window.currentSoundType, window.currentSoundVol, window.currentCustomAudio);
-  }, window.currentLoopInterval || 5000);
+  loopAlertTimer = setInterval(() => { playSound(window.currentSoundType, window.currentSoundVol, window.currentCustomAudio); }, window.currentLoopInterval || 5000);
   if ($('stopAlertBtn')) $('stopAlertBtn').hidden = false;
   if ($('stopAlertBtn2')) $('stopAlertBtn2').hidden = false;
 }
-
 function stopLoopAlert() {
-  if (loopAlertTimer) {
-    clearInterval(loopAlertTimer);
-    loopAlertTimer = null;
-  }
+  if (loopAlertTimer) { clearInterval(loopAlertTimer); loopAlertTimer = null; }
   try {
-    if (window.currentActiveAudio) {
-      window.currentActiveAudio.pause();
-      window.currentActiveAudio.currentTime = 0;
-      window.currentActiveAudio = null;
-    }
+    if (window.currentActiveAudio) { window.currentActiveAudio.pause(); window.currentActiveAudio.currentTime = 0; window.currentActiveAudio = null; }
   } catch(e) {}
   if ($('stopAlertBtn')) $('stopAlertBtn').hidden = true;
   if ($('stopAlertBtn2')) $('stopAlertBtn2').hidden = true;
 }
-
 function testSound() {
   const t = $('setSound') ? $('setSound').value : 'bell';
   const v = $('setVol') ? $('setVol').value : '1.0';
@@ -1178,9 +1109,7 @@ document.addEventListener('DOMContentLoaded', () => {
       init();
     } catch (e) { alert(e.message); }
   };
-  document.addEventListener('click', function initAudioOnce() {
-    try { getCtx(); } catch(e) {}
-  }, { once: false });
+  document.addEventListener('click', function initAudioOnce() { try { getCtx(); } catch(e) {} }, { once: false });
 });
 
 $('logoutBtn').onclick = async function () {
@@ -1193,8 +1122,7 @@ $('logoutBtn').onclick = async function () {
 function switchTab(tabId) {
   document.querySelectorAll('.tab').forEach(t => { t.hidden = t.id !== tabId; });
   document.querySelectorAll('#adminNav button').forEach(b => {
-    if(b.dataset.tab === tabId) b.classList.add('active');
-    else b.classList.remove('active');
+    if(b.dataset.tab === tabId) b.classList.add('active'); else b.classList.remove('active');
   });
   if (tabId === 'tablesTab') loadTables();
   if (tabId === 'toppingsTab') loadToppings();
@@ -1223,25 +1151,17 @@ async function loadOrders() {
   try {
     const orders = await api('/api/orders');
     allOrdersCache = orders;
-    
     const tables = [...new Set(orders.map(o => o.table))].sort();
     const sel = $('filterTableSelect');
     const curSel = sel ? sel.value : '';
     let optHtml = '<option value="">-- ทุกโต๊ะ --</option>';
     tables.forEach(t => { optHtml += '<option value="' + esc(t) + '">โต๊ะ ' + esc(t) + '</option>'; });
-    if (sel) {
-      sel.innerHTML = optHtml;
-      sel.value = curSel;
-    }
+    if (sel) { sel.innerHTML = optHtml; sel.value = curSel; }
 
     const hasPending = orders.some(o => o.status === 'pending');
-    if (lastOrderCount !== -1 && orders.length > lastOrderCount) {
-      startLoopAlert();
-    } else if (hasPending && !loopAlertTimer) {
-      startLoopAlert();
-    } else if (!hasPending) {
-      stopLoopAlert();
-    }
+    if (lastOrderCount !== -1 && orders.length > lastOrderCount) startLoopAlert();
+    else if (hasPending && !loopAlertTimer) startLoopAlert();
+    else if (!hasPending) stopLoopAlert();
     lastOrderCount = orders.length;
 
     renderOrdersView();
@@ -1252,7 +1172,6 @@ async function loadOrders() {
 function renderOrdersView() {
   const selectedTable = $('filterTableSelect') ? $('filterTableSelect').value : '';
   const todayStr = new Date().toISOString().split('T')[0];
-
   let filtered = allOrdersCache.filter(o => {
     if (selectedTable && o.table !== selectedTable) return false;
     const oDate = o.createdAt.split('T')[0];
@@ -1260,14 +1179,12 @@ function renderOrdersView() {
     if (currentFilterMode === 'custom' && currentFilterDateVal) return oDate === currentFilterDateVal;
     return true;
   });
-
   filtered = filtered.slice().sort((a, b) => {
     const pa = a.status === 'pending' ? 0 : 1;
     const pb = b.status === 'pending' ? 0 : 1;
     if (pa !== pb) return pa - pb;
     return new Date(b.createdAt) - new Date(a.createdAt);
   });
-
   const pendingCount = filtered.filter(o => o.status === 'pending').length;
   if ($('newOrderSummary')) $('newOrderSummary').textContent = pendingCount > 0 ? '🆕 มีออเดอร์ที่ยังไม่ได้รับ ' + pendingCount + ' รายการ' : 'ไม่มีออเดอร์ใหม่ที่ค้างอยู่';
 
@@ -1278,14 +1195,16 @@ function renderOrdersView() {
         '<b>' + (isNew ? '<span class="order-new-tag">🆕 ใหม่</span>' : '') + '#' + o.id + ' โต๊ะ ' + esc(o.table) + '</b>' +
         '<span class="badge ' + o.status + '">' + STATUS[o.status] + '</span></div>' +
         '<small class="muted">' + new Date(o.createdAt).toLocaleString('th-TH') + '</small><ul style="margin:8px 0; padding-left:20px;">';
-      o.items.forEach(i => { 
+      o.items.forEach(i => {
+        let tagLine = '';
+        if (i.plara) tagLine += esc(i.plara) + 'ปลาร้า';
+        if (i.spice) tagLine += (tagLine ? ' · ' : '') + esc(i.spice);
         s += '<li>' + esc(i.name) + ' × <b>' + i.qty + '</b>' +
-          (i.plara ? ' <span style="color:#7c3aed;">(' + esc(i.plara) + 'ปลาร้า · ' + esc(i.spice) + ')</span>' : '') +
+          (tagLine ? ' <span style="color:#7c3aed;">(' + tagLine + ')</span>' : '') +
           ((i.toppings && i.toppings.length) ? ' <span style="color:#0891b2;">[' + i.toppings.map(t => esc(t.name)).join(', ') + ']</span>' : '') +
-          (i.note ? ' <span class="muted">(' + esc(i.note) + ')</span>' : '') + '</li>'; 
+          (i.note ? ' <span class="muted">(' + esc(i.note) + ')</span>' : '') + '</li>';
       });
       s += '</ul><p style="margin:8px 0;"><b>รวมราคาทั้งสิ้น: ' + o.total + ' บาท</b></p><div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:8px;">';
-      
       Object.keys(STATUS).forEach(k => {
         s += '<button type="button" data-id="' + o.id + '" data-s="' + k + '" onclick="setStatus(this)" style="font-size:0.8rem; padding:5px 10px;"' +
           (k === o.status ? ' disabled style="background:#cbd5e1; border-color:#cbd5e1;"' : '') + '>' + STATUS[k] + '</button> ';
@@ -1295,12 +1214,7 @@ function renderOrdersView() {
   }
 }
 
-async function loadTables() {
-  try {
-    tablesData = await api('/api/tables');
-    renderTableStatusView();
-  } catch(e) {}
-}
+async function loadTables() { try { tablesData = await api('/api/tables'); renderTableStatusView(); } catch(e) {} }
 
 async function addNewTable(e) {
   e.preventDefault();
@@ -1312,9 +1226,7 @@ async function addNewTable(e) {
     nameInput.value = '';
     renderTableStatusView();
     alert('เพิ่มโต๊ะเรียบร้อยแล้ว');
-  } catch(err) {
-    alert(err.message);
-  }
+  } catch(err) { alert(err.message); }
 }
 
 async function deleteTable(tableName) {
@@ -1323,36 +1235,22 @@ async function deleteTable(tableName) {
     tablesData = await api('/api/tables/' + encodeURIComponent(tableName), { method: 'DELETE' });
     renderTableStatusView();
     alert('ลบโต๊ะเรียบร้อยแล้ว');
-  } catch(err) {
-    alert(err.message);
-  }
+  } catch(err) { alert(err.message); }
 }
 
 function renderTableStatusView() {
   const container = $('tableStatusContainer');
   if (!container) return;
-
-  const allTables = [...new Set([...tablesData, ...allOrdersCache.map(o => o.table)])].sort((a, b) => {
-    return String(a).localeCompare(String(b), 'th', { numeric: true });
-  });
-
+  const allTables = [...new Set([...tablesData, ...allOrdersCache.map(o => o.table)])].sort((a, b) => String(a).localeCompare(String(b), 'th', { numeric: true }));
   let html = '';
   allTables.forEach(tbl => {
     const tblOrders = allOrdersCache.filter(o => o.table === tbl && o.status !== 'cancelled');
     const hasActiveOrder = tblOrders.some(o => o.status === 'pending' || o.status === 'cooking');
     const hasServedOrder = tblOrders.some(o => o.status === 'served');
-
     let statusText = '🟢 โต๊ะว่าง';
-    let statusBg = '#10b981'; 
-
-    if (hasActiveOrder) {
-      statusText = '🔥 มีออเดอร์/กำลังทำ';
-      statusBg = '#f59e0b'; 
-    } else if (hasServedOrder) {
-      statusText = '🍽️ กำลังทานอาหาร';
-      statusBg = '#06b6d4'; 
-    }
-
+    let statusBg = '#10b981';
+    if (hasActiveOrder) { statusText = '🔥 มีออเดอร์/กำลังทำ'; statusBg = '#f59e0b'; }
+    else if (hasServedOrder) { statusText = '🍽️ กำลังทานอาหาร'; statusBg = '#06b6d4'; }
     html += '<div class="panel" style="border-top: 5px solid ' + statusBg + '; text-align: center; position: relative;">' +
       (me && me.role === 'admin' ? '<button type="button" onclick="deleteTable(\\'' + esc(tbl) + '\\')" style="position: absolute; top: 8px; right: 8px; background: none; border: none; color: #ef4444; font-size: 0.8rem; padding: 2px 6px;" title="ลบโต๊ะ">❌</button>' : '') +
       '<h2 style="margin: 6px 0; font-size: 1.4rem;">โต๊ะ ' + esc(tbl) + '</h2>' +
@@ -1368,33 +1266,22 @@ async function clearTable(tableNo) {
   if (!confirm('ต้องการเคลียร์โต๊ะ ' + tableNo + ' (ลูกค้าย้ายออก/เช็กบิลแล้วใช่ไหม?)')) return;
   try {
     const targetOrders = allOrdersCache.filter(o => o.table === tableNo && o.status !== 'cancelled' && o.status !== 'served');
-    for (const o of targetOrders) {
-      await api('/api/orders/' + o.id, { method: 'PATCH', body: { status: 'served' } });
-    }
+    for (const o of targetOrders) { await api('/api/orders/' + o.id, { method: 'PATCH', body: { status: 'served' } }); }
     loadOrders();
     alert('เคลียร์โต๊ะ ' + tableNo + ' เรียบร้อยแล้ว');
-  } catch(e) {
-    alert('เกิดข้อผิดพลาด: ' + e.message);
-  }
+  } catch(e) { alert('เกิดข้อผิดพลาด: ' + e.message); }
 }
 
 async function setStatus(btn) {
-  try { 
-    stopLoopAlert();
-    await api('/api/orders/' + btn.dataset.id, { method: 'PATCH', body: { status: btn.dataset.s } }); 
-    loadOrders(); 
-  } catch (e) { alert(e.message); }
+  try { stopLoopAlert(); await api('/api/orders/' + btn.dataset.id, { method: 'PATCH', body: { status: btn.dataset.s } }); loadOrders(); }
+  catch (e) { alert(e.message); }
 }
 
 async function clearAllOrders() {
   if (!confirm('ต้องการลบประวัติออเดอร์ทั้งหมดใช่หรือไม่? (เมนูอาหารจะไม่ถูกลบ)')) return;
   if (!confirm('ยืนยันอีกครั้ง: ข้อมูลออเดอร์ทั้งหมดจะหายถาวร ต้องการดำเนินการต่อหรือไม่?')) return;
-  try {
-    await api('/api/orders', { method: 'DELETE' });
-    stopLoopAlert();
-    loadOrders();
-    alert('เคลียร์ประวัติออเดอร์เรียบร้อยแล้ว');
-  } catch (e) { alert(e.message); }
+  try { await api('/api/orders', { method: 'DELETE' }); stopLoopAlert(); loadOrders(); alert('เคลียร์ประวัติออเดอร์เรียบร้อยแล้ว'); }
+  catch (e) { alert(e.message); }
 }
 
 setInterval(loadOrders, 4000);
@@ -1446,19 +1333,19 @@ function toggleMenuTopping(id, checked) {
 
 async function loadMenu() {
   menuData = await api('/api/menu');
-  
   const cats = [...new Set(menuData.map(m => m.category))].filter(Boolean);
   let catOpts = '<option value="">-- เลือกหมวดหมู่ที่มีอยู่ --</option>';
-  cats.forEach(c => {
-    catOpts += '<option value="' + esc(c) + '">' + esc(c) + '</option>';
-  });
+  cats.forEach(c => { catOpts += '<option value="' + esc(c) + '">' + esc(c) + '</option>'; });
   if ($('mCat')) $('mCat').innerHTML = catOpts;
 
   let s = '<tr><th>รูป</th><th>ชื่อเมนู</th><th>ราคา</th><th>หมวด</th><th>สถานะ</th><th>จัดการ</th></tr>';
   menuData.forEach(m => {
     s += '<tr>' +
       '<td>' + (m.image ? '<img src="' + esc(m.image) + '" style="width:40px;height:40px;object-fit:cover;border-radius:4px;" onerror="this.style.display=\\'none\\'">' : '-') + '</td>' +
-      '<td><b>' + esc(m.name) + '</b> ' + (m.recommended ? '<span style="color:red; font-size:0.8rem;">(แนะนำ)</span>' : '') + (m.hasPlaraOption ? '<span style="color:#7c3aed; font-size:0.8rem;"> (มีปลาร้า/เผ็ดเลือกได้)</span>' : '') + ((m.toppings && m.toppings.length) ? '<span style="color:#0891b2; font-size:0.8rem;"> (มีท็อปปิ้ง ' + m.toppings.length + ')</span>' : '') + '</td>' +
+      '<td><b>' + esc(m.name) + '</b> ' + (m.recommended ? '<span style="color:red; font-size:0.8rem;">(แนะนำ)</span>' : '') +
+      (m.hasPlaraOption ? '<span style="color:#7c3aed; font-size:0.8rem;"> (ปลาร้า)</span>' : '') +
+      (m.hasSpiceOption ? '<span style="color:#ea580c; font-size:0.8rem;"> (เผ็ด)</span>' : '') +
+      ((m.toppings && m.toppings.length) ? '<span style="color:#0891b2; font-size:0.8rem;"> (ท็อปปิ้ง ' + m.toppings.length + ')</span>' : '') + '</td>' +
       '<td>' + m.price + '฿</td><td>' + esc(m.category) + '</td>' +
       '<td>' + (m.available ? '<span style="color:green;">พร้อมขาย</span>' : '<span style="color:red;">หมด</span>') + '</td>' +
       '<td><button type="button" onclick="editMenu(' + m.id + ')">แก้ไข</button> <button type="button" onclick="delMenu(' + m.id + ')" style="color:red;">ลบ</button></td></tr>';
@@ -1473,20 +1360,12 @@ function addNewCategoryPrompt() {
   const newCat = prompt('กรอกชื่อหมวดหมู่ใหม่ที่ต้องการเพิ่ม:');
   if (!newCat || !newCat.trim()) return;
   const trimmedCat = newCat.trim();
-
   const select = $('mCat');
   let exists = false;
-  for (let i = 0; i < select.options.length; i++) {
-    if (select.options[i].value === trimmedCat) {
-      exists = true;
-      break;
-    }
-  }
-
+  for (let i = 0; i < select.options.length; i++) { if (select.options[i].value === trimmedCat) { exists = true; break; } }
   if (!exists) {
     const opt = document.createElement('option');
-    opt.value = trimmedCat;
-    opt.textContent = trimmedCat;
+    opt.value = trimmedCat; opt.textContent = trimmedCat;
     select.appendChild(opt);
   }
   select.value = trimmedCat;
@@ -1495,23 +1374,19 @@ function addNewCategoryPrompt() {
 function editMenu(id) {
   const m = menuData.find(x => x.id === id);
   $('mId').value = m.id; $('mName').value = m.name; $('mPrice').value = m.price;
-  
   const select = $('mCat');
   let found = false;
-  for (let i = 0; i < select.options.length; i++) {
-    if (select.options[i].value === m.category) { found = true; break; }
-  }
+  for (let i = 0; i < select.options.length; i++) { if (select.options[i].value === m.category) { found = true; break; } }
   if (!found && m.category) {
     const opt = document.createElement('option');
-    opt.value = m.category;
-    opt.textContent = m.category;
+    opt.value = m.category; opt.textContent = m.category;
     select.appendChild(opt);
   }
   select.value = m.category || '';
-
-  $('mImg').value = m.image || ''; 
+  $('mImg').value = m.image || '';
   $('mAvail').checked = m.available; $('mRec').checked = !!m.recommended;
   $('mPlara').checked = !!m.hasPlaraOption;
+  $('mSpice').checked = !!m.hasSpiceOption;
   selectedMenuToppings = (m.toppings || []).slice();
   renderMenuToppingsCheckboxes();
   window.scrollTo({ top: 300, behavior: 'smooth' });
@@ -1522,7 +1397,7 @@ async function submitMenuForm(e) {
   e.preventDefault();
   const body = { name: $('mName').value, price: Number($('mPrice').value), category: $('mCat').value,
                  image: $('mImg').value, available: $('mAvail').checked, recommended: $('mRec').checked,
-                 hasPlaraOption: $('mPlara').checked, toppings: selectedMenuToppings };
+                 hasPlaraOption: $('mPlara').checked, hasSpiceOption: $('mSpice').checked, toppings: selectedMenuToppings };
   try {
     if ($('mId').value) await api('/api/menu/' + $('mId').value, { method: 'PUT', body: body });
     else await api('/api/menu', { method: 'POST', body: body });
@@ -1545,9 +1420,7 @@ async function loadSettingsForm() {
     const s = await api('/api/settings');
     if (s.theme && $('setTheme')) $('setTheme').value = s.theme;
     if (s.shopName && $('setName')) $('setName').value = s.shopName;
-    if (Array.isArray(s.categoryOrder)) {
-      currentSettingsCatOrder = s.categoryOrder;
-    }
+    if (Array.isArray(s.categoryOrder)) currentSettingsCatOrder = s.categoryOrder;
     if (s.logo && $('setLogo')) {
       $('setLogo').value = s.logo;
       const prev = $('logoPreview');
@@ -1557,12 +1430,10 @@ async function loadSettingsForm() {
     if (s.customAudio && $('setCustomAudio')) $('setCustomAudio').value = s.customAudio;
     if (s.soundVolume && $('setVol')) $('setVol').value = s.soundVolume;
     if (s.loopInterval && $('setLoopInterval')) $('setLoopInterval').value = s.loopInterval;
-    
     window.currentSoundType = s.soundType || 'bell';
     window.currentCustomAudio = s.customAudio || '';
     window.currentSoundVol = Number(s.soundVolume || '1.0');
     window.currentLoopInterval = Number(s.loopInterval || '5') * 1000;
-
     renderCategoryOrderUI();
   } catch(e){}
 }
@@ -1571,19 +1442,16 @@ async function renderCategoryOrderUI() {
   try {
     const menuList = await api('/api/menu');
     const allCats = [...new Set(menuList.map(m => m.category))].filter(Boolean);
-    
     let ordered = [...currentSettingsCatOrder];
     allCats.forEach(c => { if (!ordered.includes(c)) ordered.push(c); });
     ordered = ordered.filter(c => allCats.includes(c));
     currentSettingsCatOrder = ordered;
 
-    let html = '';
     let delOpts = '<option value="">-- เลือกหมวดหมู่ที่ต้องการลบ --</option>';
-    allCats.forEach(c => {
-      delOpts += '<option value="' + esc(c) + '">' + esc(c) + '</option>';
-    });
+    allCats.forEach(c => { delOpts += '<option value="' + esc(c) + '">' + esc(c) + '</option>'; });
     if ($('delCatSelect')) $('delCatSelect').innerHTML = delOpts;
 
+    let html = '';
     if (!ordered.length) {
       html = '<p class="muted" style="margin:4px 0; font-size:0.9rem;">ยังไม่มีหมวดหมู่ในระบบ (ให้เพิ่มเมนูก่อน)</p>';
     } else {
@@ -1606,7 +1474,6 @@ function moveCat(index, direction) {
   const temp = currentSettingsCatOrder[index];
   currentSettingsCatOrder[index] = currentSettingsCatOrder[target];
   currentSettingsCatOrder[target] = temp;
-  
   let html = '';
   currentSettingsCatOrder.forEach((cat, idx) => {
     html += '<div style="display:flex; justify-content:space-between; align-items:center; background:#fff; padding:6px 10px; margin:4px 0; border-radius:6px; border:1px solid #cbd5e1;">' +
@@ -1623,41 +1490,29 @@ async function deleteCategory() {
   const catToDel = $('delCatSelect').value;
   if (!catToDel) return alert('กรุณาเลือกหมวดหมู่ที่ต้องการลบ');
   if (!confirm('ยืนยันการลบหมวดหมู่ "' + catToDel + '"? เมนูทั้งหมดในหมวดนี้จะถูกย้ายไปที่หมวด "อื่นๆ"')) return;
-
   try {
     for (const m of menuData) {
-      if (m.category === catToDel) {
-        m.category = 'อื่นๆ';
-        await api('/api/menu/' + m.id, { method: 'PUT', body: m });
-      }
+      if (m.category === catToDel) { m.category = 'อื่นๆ'; await api('/api/menu/' + m.id, { method: 'PUT', body: m }); }
     }
     alert('ลบหมวดหมู่เรียบร้อยแล้ว');
     loadMenu();
     loadSettingsForm();
-  } catch(e) {
-    alert('เกิดข้อผิดพลาด: ' + e.message);
-  }
+  } catch(e) { alert('เกิดข้อผิดพลาด: ' + e.message); }
 }
 
 async function saveSettings() {
   try {
     const logoVal = $('setLogo').value.trim();
     const body = {
-      theme: $('setTheme').value,
-      shopName: $('setName').value,
-      logo: logoVal,
-      soundType: $('setSound').value,
-      customAudio: $('setCustomAudio').value,
-      soundVolume: $('setVol').value,
-      loopInterval: $('setLoopInterval').value,
+      theme: $('setTheme').value, shopName: $('setName').value, logo: logoVal,
+      soundType: $('setSound').value, customAudio: $('setCustomAudio').value,
+      soundVolume: $('setVol').value, loopInterval: $('setLoopInterval').value,
       categoryOrder: currentSettingsCatOrder
     };
     const res = await api('/api/settings', { method: 'PUT', body: body });
     document.documentElement.style.setProperty('--primary', res.theme);
     if ($('shopNameText')) $('shopNameText').textContent = res.shopName;
-    if (Array.isArray(res.categoryOrder)) {
-      customCatOrder = res.categoryOrder;
-    }
+    if (Array.isArray(res.categoryOrder)) customCatOrder = res.categoryOrder;
     document.querySelectorAll('.shopLogo').forEach(img => {
       if(res.logo) { img.onerror = function(){ img.hidden = true; }; img.src = res.logo; img.hidden = false; } else { img.hidden = true; }
     });
@@ -1665,7 +1520,6 @@ async function saveSettings() {
     window.currentCustomAudio = res.customAudio;
     window.currentSoundVol = Number(res.soundVolume);
     window.currentLoopInterval = Number(res.loopInterval || '5') * 1000;
-
     alert('บันทึกการตั้งค่าสำเร็จ!');
     loadSettingsForm();
   } catch(e) { alert('บันทึกไม่สำเร็จ: ' + e.message); }
