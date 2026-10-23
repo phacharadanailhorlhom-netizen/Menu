@@ -1,4 +1,4 @@
-// ===== ระบบสั่งอาหารร้านค้า: JSONBin Sync, Table Management, Spice/Plara แยกอิสระ, Toppings =====
+// ===== ระบบสั่งอาหารร้านค้า: JSONBin Sync, Table Mgmt, Plara/Spice/Topping (แยกอิสระ+หมวดหมู่), Menu Grouped by Category =====
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -84,9 +84,11 @@ async function initStorage() {
 
   db.menu.forEach(m => { 
     if (m.hasPlaraOption === undefined) m.hasPlaraOption = false; 
-    if (m.hasSpiceOption === undefined) m.hasSpiceOption = !!m.hasPlaraOption; // migrate ของเดิมที่เคยผูกกัน
+    if (m.hasSpiceOption === undefined) m.hasSpiceOption = !!m.hasPlaraOption;
     if (!Array.isArray(m.toppings)) m.toppings = [];
+    if (m.hasToppingOption === undefined) m.hasToppingOption = m.toppings.length > 0;
   });
+  db.toppings.forEach(t => { if (!t.category) t.category = 'ท็อปปิ้งทั่วไป'; });
   save();
 }
 
@@ -141,6 +143,7 @@ function cleanMenu(b) {
     recommended: !!b.recommended,
     hasPlaraOption: !!b.hasPlaraOption,
     hasSpiceOption: !!b.hasSpiceOption,
+    hasToppingOption: !!b.hasToppingOption,
     toppings: toppingIds
   };
 }
@@ -148,7 +151,7 @@ function cleanTopping(b) {
   const name = String(b.name || '').trim();
   const price = Number(b.price);
   if (!name || !Number.isFinite(price) || price < 0) return null;
-  return { name: name.slice(0, 60), price: price };
+  return { name: name.slice(0, 60), price: price, category: String(b.category || '').trim() || 'ท็อปปิ้งทั่วไป' };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -200,6 +203,15 @@ const server = http.createServer(async (req, res) => {
         t.id = db.nextToppingId++;
         db.toppings.push(t); save();
         return send(res, 201, t);
+      }
+      if (method === 'PUT' && id) {
+        const i = db.toppings.findIndex(x => x.id === Number(id));
+        if (i < 0) return send(res, 404, { error: 'ไม่พบท็อปปิ้ง' });
+        const t = cleanTopping(body);
+        if (!t) return send(res, 400, { error: 'ข้อมูลท็อปปิ้งไม่ถูกต้อง' });
+        t.id = db.toppings[i].id;
+        db.toppings[i] = t; save();
+        return send(res, 200, t);
       }
       if (method === 'DELETE' && id) {
         const tid = Number(id);
@@ -283,7 +295,7 @@ const server = http.createServer(async (req, res) => {
             if (!spice) return send(res, 400, { error: 'กรุณาเลือกระดับความเผ็ดก่อนสั่งเมนู "' + mm.name + '"' });
           }
 
-          const selectedToppingIds = Array.isArray(it.toppings) ? it.toppings.map(Number) : [];
+          const selectedToppingIds = (mm.hasToppingOption && Array.isArray(it.toppings)) ? it.toppings.map(Number) : [];
           const toppingLines = [];
           selectedToppingIds.forEach(tid => {
             if ((mm.toppings || []).includes(tid)) {
@@ -430,6 +442,7 @@ th { background: #f1f5f9; }
 .toppingRow { display: flex; align-items: center; gap: 8px; text-align: left; padding: 6px 0; border-bottom: 1px dashed #e2e8f0; }
 .toppingRow input { width: auto; margin: 0; }
 .confirmBtn:disabled { opacity: .4; }
+.catGroupHeader { display:flex; justify-content:space-between; align-items:center; cursor:pointer; }
 `;
 
 const COMMON_JS = `
@@ -610,8 +623,8 @@ $('searchBox').oninput = function() { renderMenu(menu); };
 function add(id) {
   const m = menu.find(x => x.id === id);
   if (!m) return;
-  const hasToppings = (m.toppings || []).length > 0;
-  if (m.hasPlaraOption || m.hasSpiceOption || hasToppings) {
+  const showToppings = m.hasToppingOption && (m.toppings || []).length > 0;
+  if (m.hasPlaraOption || m.hasSpiceOption || showToppings) {
     pendingAddId = id;
     pendingPlara = null;
     pendingSpice = null;
@@ -623,12 +636,19 @@ function add(id) {
     document.querySelectorAll('#plaraChoiceGroup button').forEach(b => b.classList.remove('selected'));
     document.querySelectorAll('#spiceChoiceGroup button').forEach(b => b.classList.remove('selected'));
 
-    if (hasToppings) {
+    if (showToppings) {
       const items = toppingsData.filter(t => (m.toppings || []).includes(t.id));
-      $('toppingList').innerHTML = items.map(t =>
-        '<label class="toppingRow"><input type="checkbox" value="' + t.id + '" onchange="toggleTopping(' + t.id + ', this.checked)"> ' +
-        esc(t.name) + ' (+' + t.price + ' บาท)</label>'
-      ).join('') || '<p class="muted">- ไม่มีท็อปปิ้งสำหรับเมนูนี้ -</p>';
+      const byCat = {};
+      items.forEach(t => { const c = t.category || 'ท็อปปิ้งทั่วไป'; (byCat[c] = byCat[c] || []).push(t); });
+      let html = '';
+      Object.keys(byCat).forEach(cat => {
+        html += '<p style="margin:8px 0 2px; font-size:0.85rem; font-weight:bold; text-align:left; color:#0891b2;">' + esc(cat) + '</p>';
+        html += byCat[cat].map(t =>
+          '<label class="toppingRow"><input type="checkbox" value="' + t.id + '" onchange="toggleTopping(' + t.id + ', this.checked)"> ' +
+          esc(t.name) + ' (+' + t.price + ' บาท)</label>'
+        ).join('');
+      });
+      $('toppingList').innerHTML = html || '<p class="muted">- ไม่มีท็อปปิ้งสำหรับเมนูนี้ -</p>';
       $('toppingSection').hidden = false;
     } else {
       $('toppingSection').hidden = true;
@@ -842,9 +862,10 @@ const ADMIN_BODY = `
         <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mRec"> 🌟 ตั้งเป็นเมนูแนะนำ (ขึ้นโชว์ด้านบน)</label>
         <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mPlara"> 🐟 มีตัวเลือกใส่/ไม่ใส่ปลาร้า</label>
         <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mSpice"> 🌶️ มีตัวเลือกระดับความเผ็ด</label>
+        <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mToppingSwitch"> ➕ มีตัวเลือกท็อปปิ้ง</label>
       </div>
 
-      <label style="display:block; margin-top:8px;">➕ ท็อปปิ้งที่เลือกได้สำหรับเมนูนี้ (ไม่บังคับ):</label>
+      <label style="display:block; margin-top:8px;">➕ ท็อปปิ้งที่เลือกได้สำหรับเมนูนี้ (ไม่บังคับ และทำงานเมื่อเปิดสวิตช์ด้านบน):</label>
       <div id="mToppingsList" style="background:#f1f5f9; padding:8px; border-radius:8px; margin:6px 0;">
         <p class="muted" style="margin:4px 0; font-size:0.9rem;">กำลังโหลดรายการท็อปปิ้ง...</p>
       </div>
@@ -852,8 +873,8 @@ const ADMIN_BODY = `
       <button type="submit" class="primary">บันทึกการแก้ไขเมนู</button>
       <button type="button" id="mReset" onclick="resetMenuForm()" style="width:100%; margin-top:6px;">ล้างฟอร์ม</button>
     </form>
-    <h3>รายการเมนูทั้งหมดในระบบ</h3>
-    <div style="overflow-x:auto;"><table id="menuTable"></table></div>
+    <h3>รายการเมนูทั้งหมดในระบบ (แยกตามหมวดหมู่)</h3>
+    <div id="menuByCategory"></div>
   </section>
 
   <section id="toppingsTab" class="tab" hidden>
@@ -861,10 +882,17 @@ const ADMIN_BODY = `
       <h3>➕ เพิ่มรายการท็อปปิ้ง</h3>
       <input id="tName" placeholder="ชื่อท็อปปิ้ง เช่น ไข่เค็ม, หมูยอ" required>
       <input id="tPrice" type="number" min="0" placeholder="ราคาเพิ่ม (บาท)" required>
+      <label style="display:block; margin-top:8px;">หมวดหมู่ท็อปปิ้ง:</label>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <select id="tCat" style="margin:6px 0; flex:1;">
+          <option value="">-- เลือกหรือเพิ่มหมวดใหม่ --</option>
+        </select>
+        <button type="button" onclick="addNewToppingCategoryPrompt()" style="white-space:nowrap; padding:10px;">➕ เพิ่มหมวดใหม่</button>
+      </div>
       <button type="submit" class="primary" style="margin-top:10px;">เพิ่มท็อปปิ้ง</button>
     </form>
-    <h3>รายการท็อปปิ้งทั้งหมด</h3>
-    <div style="overflow-x:auto;"><table id="toppingTable"></table></div>
+    <h3>รายการท็อปปิ้งทั้งหมด (แยกตามหมวดหมู่)</h3>
+    <div id="toppingByCategory"></div>
   </section>
 
   <section id="settingsTab" class="tab" hidden>
@@ -955,6 +983,7 @@ const ADMIN_BODY = `
 const ADMIN_JS = `
 let me = null, menuData = [], allOrdersCache = [], tablesData = [], toppingsData = [];
 let selectedMenuToppings = [];
+let menuCatCollapsed = {};
 let lastOrderCount = -1;
 let loopAlertTimer = null;
 let currentFilterMode = 'today';
@@ -1289,19 +1318,48 @@ setInterval(loadOrders, 4000);
 async function loadToppings() {
   try {
     toppingsData = await api('/api/toppings');
-    let s = '<tr><th>ชื่อท็อปปิ้ง</th><th>ราคา</th><th>จัดการ</th></tr>';
-    toppingsData.forEach(t => {
-      s += '<tr><td><b>' + esc(t.name) + '</b></td><td>+' + t.price + '฿</td><td><button type="button" onclick="delTopping(' + t.id + ')" style="color:red;">ลบ</button></td></tr>';
+    const cats = [...new Set(toppingsData.map(t => t.category || 'ท็อปปิ้งทั่วไป'))];
+    let catOpts = '<option value="">-- เลือกหรือเพิ่มหมวดใหม่ --</option>';
+    cats.forEach(c => { catOpts += '<option value="' + esc(c) + '">' + esc(c) + '</option>'; });
+    if ($('tCat')) $('tCat').innerHTML = catOpts;
+
+    const byCat = {};
+    toppingsData.forEach(t => { const c = t.category || 'ท็อปปิ้งทั่วไป'; (byCat[c] = byCat[c] || []).push(t); });
+
+    let html = '';
+    Object.keys(byCat).forEach(cat => {
+      html += '<div class="panel" style="margin-bottom:10px;"><h4 style="margin:0 0 8px;">📂 ' + esc(cat) + '</h4><div style="overflow-x:auto;"><table>' +
+        '<tr><th>ชื่อท็อปปิ้ง</th><th>ราคา</th><th>จัดการ</th></tr>';
+      byCat[cat].forEach(t => {
+        html += '<tr><td><b>' + esc(t.name) + '</b></td><td>+' + t.price + '฿</td><td><button type="button" onclick="delTopping(' + t.id + ')" style="color:red;">ลบ</button></td></tr>';
+      });
+      html += '</table></div></div>';
     });
-    if ($('toppingTable')) $('toppingTable').innerHTML = s || '';
+    if ($('toppingByCategory')) $('toppingByCategory').innerHTML = html || '<p class="muted">ยังไม่มีท็อปปิ้งในระบบ</p>';
+
     renderMenuToppingsCheckboxes();
   } catch(e) {}
+}
+
+function addNewToppingCategoryPrompt() {
+  const newCat = prompt('กรอกชื่อหมวดหมู่ท็อปปิ้งใหม่:');
+  if (!newCat || !newCat.trim()) return;
+  const trimmedCat = newCat.trim();
+  const select = $('tCat');
+  let exists = false;
+  for (let i = 0; i < select.options.length; i++) { if (select.options[i].value === trimmedCat) { exists = true; break; } }
+  if (!exists) {
+    const opt = document.createElement('option');
+    opt.value = trimmedCat; opt.textContent = trimmedCat;
+    select.appendChild(opt);
+  }
+  select.value = trimmedCat;
 }
 
 async function submitToppingForm(e) {
   e.preventDefault();
   try {
-    await api('/api/toppings', { method: 'POST', body: { name: $('tName').value, price: Number($('tPrice').value) } });
+    await api('/api/toppings', { method: 'POST', body: { name: $('tName').value, price: Number($('tPrice').value), category: $('tCat').value } });
     $('toppingForm').reset();
     loadToppings();
     alert('เพิ่มท็อปปิ้งสำเร็จ!');
@@ -1320,11 +1378,18 @@ function renderMenuToppingsCheckboxes() {
     el.innerHTML = '<p class="muted" style="margin:4px 0; font-size:0.9rem;">ยังไม่มีท็อปปิ้งในระบบ (เพิ่มได้ที่แท็บ "จัดการท็อปปิ้ง")</p>';
     return;
   }
-  el.innerHTML = toppingsData.map(t =>
-    '<label style="display:flex; align-items:center; gap:8px; padding:4px 0;"><input type="checkbox" value="' + t.id + '" ' +
-    (selectedMenuToppings.includes(t.id) ? 'checked' : '') + ' onchange="toggleMenuTopping(' + t.id + ', this.checked)"> ' +
-    esc(t.name) + ' (+' + t.price + ' บาท)</label>'
-  ).join('');
+  const byCat = {};
+  toppingsData.forEach(t => { const c = t.category || 'ท็อปปิ้งทั่วไป'; (byCat[c] = byCat[c] || []).push(t); });
+  let html = '';
+  Object.keys(byCat).forEach(cat => {
+    html += '<p style="margin:8px 0 2px; font-size:0.85rem; font-weight:bold; color:#0891b2;">📂 ' + esc(cat) + '</p>';
+    html += byCat[cat].map(t =>
+      '<label style="display:flex; align-items:center; gap:8px; padding:4px 0;"><input type="checkbox" value="' + t.id + '" ' +
+      (selectedMenuToppings.includes(t.id) ? 'checked' : '') + ' onchange="toggleMenuTopping(' + t.id + ', this.checked)"> ' +
+      esc(t.name) + ' (+' + t.price + ' บาท)</label>'
+    ).join('');
+  });
+  el.innerHTML = html;
 }
 function toggleMenuTopping(id, checked) {
   if (checked) { if (!selectedMenuToppings.includes(id)) selectedMenuToppings.push(id); }
@@ -1338,23 +1403,42 @@ async function loadMenu() {
   cats.forEach(c => { catOpts += '<option value="' + esc(c) + '">' + esc(c) + '</option>'; });
   if ($('mCat')) $('mCat').innerHTML = catOpts;
 
-  let s = '<tr><th>รูป</th><th>ชื่อเมนู</th><th>ราคา</th><th>หมวด</th><th>สถานะ</th><th>จัดการ</th></tr>';
-  menuData.forEach(m => {
-    s += '<tr>' +
-      '<td>' + (m.image ? '<img src="' + esc(m.image) + '" style="width:40px;height:40px;object-fit:cover;border-radius:4px;" onerror="this.style.display=\\'none\\'">' : '-') + '</td>' +
-      '<td><b>' + esc(m.name) + '</b> ' + (m.recommended ? '<span style="color:red; font-size:0.8rem;">(แนะนำ)</span>' : '') +
-      (m.hasPlaraOption ? '<span style="color:#7c3aed; font-size:0.8rem;"> (ปลาร้า)</span>' : '') +
-      (m.hasSpiceOption ? '<span style="color:#ea580c; font-size:0.8rem;"> (เผ็ด)</span>' : '') +
-      ((m.toppings && m.toppings.length) ? '<span style="color:#0891b2; font-size:0.8rem;"> (ท็อปปิ้ง ' + m.toppings.length + ')</span>' : '') + '</td>' +
-      '<td>' + m.price + '฿</td><td>' + esc(m.category) + '</td>' +
-      '<td>' + (m.available ? '<span style="color:green;">พร้อมขาย</span>' : '<span style="color:red;">หมด</span>') + '</td>' +
-      '<td><button type="button" onclick="editMenu(' + m.id + ')">แก้ไข</button> <button type="button" onclick="delMenu(' + m.id + ')" style="color:red;">ลบ</button></td></tr>';
+  const byCat = {};
+  menuData.forEach(m => { const c = m.category || 'อื่นๆ'; (byCat[c] = byCat[c] || []).push(m); });
+
+  let html = '';
+  Object.keys(byCat).sort((a,b) => a.localeCompare(b,'th')).forEach(cat => {
+    const items = byCat[cat];
+    const collapsed = !!menuCatCollapsed[cat];
+    html += '<div class="panel" style="margin-bottom:14px;">' +
+      '<div class="catGroupHeader" onclick="toggleMenuCatGroup(\\'' + esc(cat).replace(/'/g, "\\\\'") + '\\')">' +
+      '<h3 style="margin:0;">📂 ' + esc(cat) + ' <span class="muted" style="font-size:0.8rem;">(' + items.length + ' รายการ)</span></h3>' +
+      '<span>' + (collapsed ? '▼ แสดง' : '▲ ซ่อน') + '</span></div>';
+    if (!collapsed) {
+      html += '<div style="overflow-x:auto; margin-top:10px;"><table>' +
+        '<tr><th>รูป</th><th>ชื่อเมนู</th><th>ราคา</th><th>สถานะ</th><th>จัดการ</th></tr>';
+      items.forEach(m => {
+        html += '<tr>' +
+          '<td>' + (m.image ? '<img src="' + esc(m.image) + '" style="width:40px;height:40px;object-fit:cover;border-radius:4px;" onerror="this.style.display=\\'none\\'">' : '-') + '</td>' +
+          '<td><b>' + esc(m.name) + '</b> ' + (m.recommended ? '<span style="color:red; font-size:0.8rem;">(แนะนำ)</span>' : '') +
+          (m.hasPlaraOption ? '<span style="color:#7c3aed; font-size:0.8rem;"> (ปลาร้า)</span>' : '') +
+          (m.hasSpiceOption ? '<span style="color:#ea580c; font-size:0.8rem;"> (เผ็ด)</span>' : '') +
+          (m.hasToppingOption ? '<span style="color:#0891b2; font-size:0.8rem;"> (ท็อปปิ้ง ' + (m.toppings ? m.toppings.length : 0) + ')</span>' : '') + '</td>' +
+          '<td>' + m.price + '฿</td>' +
+          '<td>' + (m.available ? '<span style="color:green;">พร้อมขาย</span>' : '<span style="color:red;">หมด</span>') + '</td>' +
+          '<td><button type="button" onclick="editMenu(' + m.id + ')">แก้ไข</button> <button type="button" onclick="delMenu(' + m.id + ')" style="color:red;">ลบ</button></td></tr>';
+      });
+      html += '</table></div>';
+    }
+    html += '</div>';
   });
-  if ($('menuTable')) $('menuTable').innerHTML = s;
+  if ($('menuByCategory')) $('menuByCategory').innerHTML = html || '<p class="muted">ยังไม่มีเมนูในระบบ</p>';
 
   if (!toppingsData.length) { try { toppingsData = await api('/api/toppings'); } catch(e) {} }
   renderMenuToppingsCheckboxes();
 }
+
+function toggleMenuCatGroup(cat) { menuCatCollapsed[cat] = !menuCatCollapsed[cat]; loadMenu(); }
 
 function addNewCategoryPrompt() {
   const newCat = prompt('กรอกชื่อหมวดหมู่ใหม่ที่ต้องการเพิ่ม:');
@@ -1387,6 +1471,7 @@ function editMenu(id) {
   $('mAvail').checked = m.available; $('mRec').checked = !!m.recommended;
   $('mPlara').checked = !!m.hasPlaraOption;
   $('mSpice').checked = !!m.hasSpiceOption;
+  $('mToppingSwitch').checked = !!m.hasToppingOption;
   selectedMenuToppings = (m.toppings || []).slice();
   renderMenuToppingsCheckboxes();
   window.scrollTo({ top: 300, behavior: 'smooth' });
@@ -1397,7 +1482,8 @@ async function submitMenuForm(e) {
   e.preventDefault();
   const body = { name: $('mName').value, price: Number($('mPrice').value), category: $('mCat').value,
                  image: $('mImg').value, available: $('mAvail').checked, recommended: $('mRec').checked,
-                 hasPlaraOption: $('mPlara').checked, hasSpiceOption: $('mSpice').checked, toppings: selectedMenuToppings };
+                 hasPlaraOption: $('mPlara').checked, hasSpiceOption: $('mSpice').checked,
+                 hasToppingOption: $('mToppingSwitch').checked, toppings: selectedMenuToppings };
   try {
     if ($('mId').value) await api('/api/menu/' + $('mId').value, { method: 'PUT', body: body });
     else await api('/api/menu', { method: 'POST', body: body });
