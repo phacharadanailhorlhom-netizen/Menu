@@ -1,4 +1,4 @@
-// ===== ระบบสั่งอาหารร้านค้า: JSONBin Sync, Table Mgmt, Plara/Spice/Topping (แยกอิสระ+หมวดหมู่), Menu Grouped by Category =====
+// ===== ระบบสั่งอาหารร้านค้า: Optimized Version (Fast Polling, Category Topping Select, Grouped Menu) =====
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -98,14 +98,16 @@ function save() {
   } catch(e) {}
   
   if (JSONBIN_ID && JSONBIN_KEY) {
-    fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_ID}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Master-Key': JSONBIN_KEY
-      },
-      body: JSON.stringify(db)
-    }).catch(e => {});
+    setTimeout(() => {
+      fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_ID}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Master-Key': JSONBIN_KEY
+        },
+        body: JSON.stringify(db)
+      }).catch(e => {});
+    }, 10);
   }
 }
 
@@ -384,7 +386,7 @@ const server = http.createServer(async (req, res) => {
 
 initStorage().then(() => {
   server.listen(PORT, '0.0.0.0', () => {
-    console.log('===== เซิร์ฟเวอร์ทำงานแล้ว =====');
+    console.log('===== เซิร์ฟเวอร์ทำงานแล้ว (Optimized) =====');
   });
 });
 
@@ -561,8 +563,10 @@ $('table').value = new URLSearchParams(location.search).get('table') || localSto
 
 async function loadMenu() {
   await loadSettings();
-  menu = await api('/api/menu');
-  try { toppingsData = await api('/api/toppings'); } catch(e) { toppingsData = []; }
+  try {
+    menu = await api('/api/menu');
+    toppingsData = await api('/api/toppings');
+  } catch(e) {}
   renderCatTabs();
   renderMenu(menu);
 }
@@ -642,7 +646,7 @@ function add(id) {
       items.forEach(t => { const c = t.category || 'ท็อปปิ้งทั่วไป'; (byCat[c] = byCat[c] || []).push(t); });
       let html = '';
       Object.keys(byCat).forEach(cat => {
-        html += '<p style="margin:8px 0 2px; font-size:0.85rem; font-weight:bold; text-align:left; color:#0891b2;">' + esc(cat) + '</p>';
+        html += '<p style="margin:8px 0 2px; font-size:0.85rem; font-weight:bold; text-align:left; color:#0891b2;">📂 ' + esc(cat) + '</p>';
         html += byCat[cat].map(t =>
           '<label class="toppingRow"><input type="checkbox" value="' + t.id + '" onchange="toggleTopping(' + t.id + ', this.checked)"> ' +
           esc(t.name) + ' (+' + t.price + ' บาท)</label>'
@@ -744,11 +748,16 @@ $('orderBtn').onclick = async function () {
   } catch (e) { alert(e.message); }
 };
 
+let lastTableOrdersCacheStr = '';
 async function loadTableOrders() {
   const table = $('table').value.trim();
   if (!table) return;
   try {
     const orders = await api('/api/orders/table?no=' + encodeURIComponent(table));
+    const str = JSON.stringify(orders);
+    if (str === lastTableOrdersCacheStr) return; // ข้ามการเรนเดอร์ถ้าข้อมูลไม่เปลี่ยน เพื่อความลื่นไหล
+    lastTableOrdersCacheStr = str;
+
     $('myTableOrders').innerHTML = orders.map(o => {
       let s = '<div style="border-bottom:1px dashed #eee; padding:8px 0;"><div class="row"><span><b>#' + o.id + '</b> (' + o.total + '฿)</span><span class="badge ' + o.status + '">' + STATUS[o.status] + '</span></div><ul style="margin:4px 0; padding-left:18px; font-size:0.9rem;">';
       o.items.forEach(i => {
@@ -767,8 +776,8 @@ async function loadTableOrders() {
 }
 loadMenu();
 loadTableOrders();
-setInterval(loadTableOrders, 5000);
-setInterval(loadMenu, 30000);
+setInterval(loadTableOrders, 10000); // ปรับเป็นทุก 10 วิ เพื่อลดภาระเครื่อง
+setInterval(loadMenu, 60000);       // ปรับเป็นทุก 1 นาที
 `;
 
 const ADMIN_BODY = `
@@ -865,7 +874,7 @@ const ADMIN_BODY = `
         <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mToppingSwitch"> ➕ มีตัวเลือกท็อปปิ้ง</label>
       </div>
 
-      <label style="display:block; margin-top:8px;">➕ ท็อปปิ้งที่เลือกได้สำหรับเมนูนี้ (ไม่บังคับ และทำงานเมื่อเปิดสวิตช์ด้านบน):</label>
+      <label style="display:block; margin-top:8px;">➕ ท็อปปิ้งที่เลือกได้สำหรับเมนูนี้ (ติ๊กเลือกทั้งหมวด หรือเลือกแยกรายตัวได้):</label>
       <div id="mToppingsList" style="background:#f1f5f9; padding:8px; border-radius:8px; margin:6px 0;">
         <p class="muted" style="margin:4px 0; font-size:0.9rem;">กำลังโหลดรายการท็อปปิ้ง...</p>
       </div>
@@ -1175,11 +1184,15 @@ function setOrderDate(mode, val) {
   renderOrdersView();
 }
 
+let lastOrdersCacheStr = '';
 async function loadOrders() {
   if (!me) return;
   try {
     const orders = await api('/api/orders');
+    const str = JSON.stringify(orders);
+    const isFirst = lastOrdersCacheStr === '';
     allOrdersCache = orders;
+
     const tables = [...new Set(orders.map(o => o.table))].sort();
     const sel = $('filterTableSelect');
     const curSel = sel ? sel.value : '';
@@ -1188,10 +1201,13 @@ async function loadOrders() {
     if (sel) { sel.innerHTML = optHtml; sel.value = curSel; }
 
     const hasPending = orders.some(o => o.status === 'pending');
-    if (lastOrderCount !== -1 && orders.length > lastOrderCount) startLoopAlert();
-    else if (hasPending && !loopAlertTimer) startLoopAlert();
+    if (!isFirst && str !== lastOrdersCacheStr) {
+      if (orders.length > allOrdersCache.length) startLoopAlert();
+    }
+    lastOrdersCacheStr = str;
+
+    if (hasPending && !loopAlertTimer) startLoopAlert();
     else if (!hasPending) stopLoopAlert();
-    lastOrderCount = orders.length;
 
     renderOrdersView();
     renderTableStatusView();
@@ -1313,7 +1329,7 @@ async function clearAllOrders() {
   catch (e) { alert(e.message); }
 }
 
-setInterval(loadOrders, 4000);
+setInterval(loadOrders, 6000); // ปรับความเร็วสำรวจออเดอร์แอดมินให้สมดุล (ทุก 6 วิ)
 
 async function loadToppings() {
   try {
