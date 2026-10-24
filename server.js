@@ -1,4 +1,4 @@
-// ===== ระบบสั่งอาหารร้านค้า: Options (ตัวเลือกบังคับฟรีไม่มีราคาเพิ่ม) + Optimized + Topping Category =====
+// ===== ระบบสั่งอาหารร้านค้า: Super Optimized Admin Panel + Clean Toppings Display =====
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -324,7 +324,6 @@ const server = http.createServer(async (req, res) => {
             if (!spice) return send(res, 400, { error: 'กรุณาเลือกระดับความเผ็ดก่อนสั่งเมนู "' + mm.name + '"' });
           }
 
-          // ตรวจสอบตัวเลือกบังคับ (Options) ครบทุกกลุ่มไหม
           const optionLines = [];
           if (mm.hasOptionChoice && (mm.options || []).length > 0) {
             const menuOpts = db.options.filter(o => (mm.options || []).includes(o.id));
@@ -342,7 +341,6 @@ const server = http.createServer(async (req, res) => {
             }
           }
 
-          // ท็อปปิ้ง (มีราคาเพิ่ม - ไม่บังคับ)
           const selectedToppingIds = (mm.hasToppingOption && Array.isArray(it.toppings)) ? it.toppings.map(Number) : [];
           const toppingLines = [];
           selectedToppingIds.forEach(tid => {
@@ -433,7 +431,7 @@ const server = http.createServer(async (req, res) => {
 
 initStorage().then(() => {
   server.listen(PORT, '0.0.0.0', () => {
-    console.log('===== เซิร์ฟเวอร์ทำงานแล้ว (Mandatory Options Added) =====');
+    console.log('===== เซิร์ฟเวอร์ทำงานแล้ว (Super Optimized Admin) =====');
   });
 });
 
@@ -831,7 +829,7 @@ function renderCart() {
       '<button onclick="changeQty(' + id + ',1)">+</button></span></div>' +
       (tagLine ? '<div style="font-size:0.8rem; color:#7c3aed;">' + tagLine + '</div>' : '') +
       (optionItems.length ? '<div style="margin:2px 0; font-size:0.85rem; color:#4f46e5;">📌 ' + optionItems.map(o => esc(o.name)).join(', ') + '</div>' : '') +
-      (toppingItems.length ? '<div style="margin:4px 0;">' + toppingItems.map(t => '<span class="tag-topping">' + esc(t.name) + '</span>').join('') + '</div>' : '') +
+      (toppingItems.length ? '<div style="margin:4px 0;">+เพิ่ม: ' + toppingItems.map(t => '<span class="tag-topping">' + esc(t.name) + '</span>').join(' ') + '</div>' : '') +
       '<input placeholder="หมายเหตุเฉพาะเมนูนี้ เช่น ไม่ใส่ผัก" value="' + esc(cart[id].note) + '" oninput="changeNote(' + id + ', this.value)" style="margin:4px 0 0; padding:6px; font-size:0.85rem;">' +
       '</div>';
   });
@@ -878,11 +876,19 @@ async function loadTableOrders() {
         let tagLine = '';
         if (i.plara) tagLine += esc(i.plara) + 'ปลาร้า';
         if (i.spice) tagLine += (tagLine ? ' · ' : '') + esc(i.spice);
-        s += '<li>' + esc(i.name) + ' × <b>' + i.qty + '</b>' +
-          (tagLine ? ' <span style="color:#7c3aed;">(' + tagLine + ')</span>' : '') +
-          ((i.options && i.options.length) ? ' <span style="color:#4f46e5;">[' + i.options.map(o => esc(o.name)).join(', ') + ']</span>' : '') +
-          ((i.toppings && i.toppings.length) ? ' <span style="color:#0891b2;">[' + i.toppings.map(t => esc(t.name)).join(', ') + ']</span>' : '') +
-          (i.note ? ' <span class="muted">(' + esc(i.note) + ')</span>' : '') + '</li>';
+        
+        let detailHtml = '';
+        if (tagLine) detailHtml += '<div style="color:#7c3aed; font-size:0.9rem;">- ' + tagLine + '</div>';
+        if (i.options && i.options.length) detailHtml += '<div style="color:#4f46e5; font-size:0.9rem;">- ตัวเลือก: ' + i.options.map(o => esc(o.name)).join(', ') + '</div>';
+        
+        if (i.toppings && i.toppings.length) {
+          detailHtml += '<div style="background:#e0f2fe; border-left:3px solid #0284c7; padding:3px 6px; margin:3px 0; border-radius:4px; color:#0369a1; font-size:0.9rem; font-weight:bold;">' +
+            '➕ +เพิ่ม: ' + i.toppings.map(t => esc(t.name)).join(', ') + '</div>';
+        }
+
+        if (i.note) detailHtml += '<div class="muted" style="font-size:0.85rem;">- หมายเหตุ: ' + esc(i.note) + '</div>';
+
+        s += '<li style="margin-bottom:8px;"><b>' + esc(i.name) + '</b> × ' + i.qty + detailHtml + '</li>';
       });
       s += '</ul></div>';
       return s;
@@ -1095,7 +1101,7 @@ const ADMIN_BODY = `
       <select id="setVol" style="margin-top:4px;">
         <option value="0.5">ระดับ 1 (ปานกลาง)</option>
         <option value="1.0">ระดับ 2 (ดัง)</option>
-        <option value="2.0">ระดับ 3 (ดังมาก - เร่งโวลุ่มพิเศษ)</option>
+        <option value="3">ระดับ 3 (ดังมาก - เร่งโวลุ่มพิเศษ)</option>
       </select>
 
       <label style="margin-top:10px; display:block;">ระยะเวลาวนลูปเสียงเตือน (วินาที):</label>
@@ -1332,7 +1338,12 @@ async function loadOrders() {
     const orders = await api('/api/orders');
     const str = JSON.stringify(orders);
     const isFirst = lastOrdersCacheStr === '';
+    
+    // ถ้าข้อมูลออเดอร์ไม่เปลี่ยนเลย ให้ข้ามการเรนเดอร์ใหม่ทันที (แก้ปัญหาหน้าแอดมินหน่วง)
+    if (!isFirst && str === lastOrdersCacheStr) return;
+    
     allOrdersCache = orders;
+    lastOrdersCacheStr = str;
 
     const tables = [...new Set(orders.map(o => o.table))].sort();
     const sel = $('filterTableSelect');
@@ -1342,10 +1353,10 @@ async function loadOrders() {
     if (sel) { sel.innerHTML = optHtml; sel.value = curSel; }
 
     const hasPending = orders.some(o => o.status === 'pending');
-    if (!isFirst && str !== lastOrdersCacheStr) {
-      if (orders.length > allOrdersCache.length) startLoopAlert();
+    if (!isFirst && orders.length > lastOrderCount) {
+      startLoopAlert();
     }
-    lastOrdersCacheStr = str;
+    lastOrderCount = orders.length;
 
     if (hasPending && !loopAlertTimer) startLoopAlert();
     else if (!hasPending) stopLoopAlert();
@@ -1385,11 +1396,19 @@ function renderOrdersView() {
         let tagLine = '';
         if (i.plara) tagLine += esc(i.plara) + 'ปลาร้า';
         if (i.spice) tagLine += (tagLine ? ' · ' : '') + esc(i.spice);
-        s += '<li>' + esc(i.name) + ' × <b>' + i.qty + '</b>' +
-          (tagLine ? ' <span style="color:#7c3aed;">(' + tagLine + ')</span>' : '') +
-          ((i.options && i.options.length) ? ' <span style="color:#4f46e5;">[' + i.options.map(o => esc(o.name)).join(', ') + ']</span>' : '') +
-          ((i.toppings && i.toppings.length) ? ' <span style="color:#0891b2;">[' + i.toppings.map(t => esc(t.name)).join(', ') + ']</span>' : '') +
-          (i.note ? ' <span class="muted">(' + esc(i.note) + ')</span>' : '') + '</li>';
+        
+        let detailHtml = '';
+        if (tagLine) detailHtml += '<div style="color:#7c3aed; font-size:0.9rem;">- ' + tagLine + '</div>';
+        if (i.options && i.options.length) detailHtml += '<div style="color:#4f46e5; font-size:0.9rem;">- ตัวเลือก: ' + i.options.map(o => esc(o.name)).join(', ') + '</div>';
+        
+        if (i.toppings && i.toppings.length) {
+          detailHtml += '<div style="background:#e0f2fe; border-left:3px solid #0284c7; padding:3px 6px; margin:3px 0; border-radius:4px; color:#0369a1; font-size:0.9rem; font-weight:bold;">' +
+            '➕ +เพิ่ม: ' + i.toppings.map(t => esc(t.name)).join(', ') + '</div>';
+        }
+
+        if (i.note) detailHtml += '<div class="muted" style="font-size:0.85rem;">- หมายเหตุ: ' + esc(i.note) + '</div>';
+
+        s += '<li style="margin-bottom:8px;"><b>' + esc(i.name) + '</b> × ' + i.qty + detailHtml + '</li>';
       });
       s += '</ul><p style="margin:8px 0;"><b>รวมราคาทั้งสิ้น: ' + o.total + ' บาท</b></p><div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:8px;">';
       Object.keys(STATUS).forEach(k => {
@@ -1471,7 +1490,7 @@ async function clearAllOrders() {
   catch (e) { alert(e.message); }
 }
 
-setInterval(loadOrders, 6000);
+setInterval(loadOrders, 8000); // ขยายเวลาพูลลิ่งให้เสถียรและเบาเครื่องขึ้น (ทุก 8 วินาที)
 
 // จัดการตัวเลือกฟรี (Options)
 async function loadOptions() {
