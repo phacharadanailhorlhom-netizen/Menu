@@ -1171,28 +1171,136 @@ window.currentActiveAudio = null;
 function handleFile(e) {
   const file = e.target.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function(evt) { $('mImg').value = evt.target.result; };
-  reader.readAsDataURL(file);
-}
-function handleLogoFile(e) {
-  const file = e.target.files[0];
-  if (!file) return;
+
   const reader = new FileReader();
   reader.onload = function(evt) {
-    $('setLogo').value = evt.target.result;
-    const prev = $('logoPreview');
-    if (prev) { prev.src = evt.target.result; prev.hidden = false; }
+    const img = new Image();
+    img.onload = function() {
+      // ตั้งค่าขนาดสูงสุดที่ต้องการ (เช่น 800px กำลังพอดีกับหน้าเว็บ)
+      const MAX_WIDTH = 800;
+      const MAX_HEIGHT = 800;
+      let width = img.width;
+      let height = img.height;
+
+      // คำนวณสัดส่วนรูปภาพ
+      if (width > height) {
+        if (width > MAX_WIDTH) {
+          height = Math.round(height * (MAX_WIDTH / width));
+          width = MAX_WIDTH;
+        }
+      } else {
+        if (height > MAX_HEIGHT) {
+          width = Math.round(width * (MAX_HEIGHT / height));
+          height = MAX_HEIGHT;
+        }
+      }
+
+      // วาดรูปลงบน Canvas เพื่อย่อขนาด
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // บีบอัดเป็น JPEG คุณภาพ 0.7 (ลดขนาดไฟล์ลงได้มากกว่า 80-90%)
+      const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+      $('mImg').value = compressedBase64;
+    };
+    img.src = evt.target.result;
   };
   reader.readAsDataURL(file);
 }
+
+function handleLogoFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function(evt) {
+    const img = new Image();
+    img.onload = function() {
+      // โลโก้ใช้ขนาดเล็ก เช่น 300x300 ก็เพียงพอ
+      const MAX_SIZE = 300;
+      let width = img.width;
+      let height = img.height;
+
+      if (width > height) {
+        if (width > MAX_SIZE) {
+          height = Math.round(height * (MAX_SIZE / width));
+          width = MAX_SIZE;
+        }
+      } else {
+        if (height > MAX_SIZE) {
+          width = Math.round(width * (MAX_SIZE / height));
+          height = MAX_SIZE;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+
+      const compressedBase64 = canvas.toDataURL('image/jpeg', 0.8);
+      $('setLogo').value = compressedBase64;
+      const prev = $('logoPreview');
+      if (prev) { prev.src = compressedBase64; prev.hidden = false; }
+    };
+    img.src = evt.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
 function handleAudioFile(e) {
   const file = e.target.files[0];
   if (!file) return;
+
   const reader = new FileReader();
-  reader.onload = function(evt) { $('setCustomAudio').value = evt.target.result; $('setSound').value = 'custom'; };
-  reader.readAsDataURL(file);
+  reader.onload = async function(evt) {
+    try {
+      const arrayBuffer = evt.target.result;
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const audioCtx = new AudioCtx();
+      
+      // ถอดรหัสไฟล์เสียง
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+      // ถ้าไม่เกิน 30 วินาทีใช้ความยาวเต็ม ถ้าเกินจะตัดเหลือ 30 วินาที
+      const maxDuration = 30; 
+      const duration = Math.min(audioBuffer.duration, maxDuration);
+      
+      // บีบอัดเป็น Mono (1 Channel) และ 22,050Hz (ประหยัดความจุ)
+      const targetSampleRate = 22050; 
+      const numFrames = Math.floor(duration * targetSampleRate);
+
+      const offlineCtx = new OfflineAudioContext(1, numFrames, targetSampleRate);
+      const source = offlineCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(offlineCtx.destination);
+      source.start(0);
+
+      const renderedBuffer = await offlineCtx.startRendering();
+      
+      // แปลงเป็น Base64 WAV
+      const wavBase64 = bufferToWavBase64(renderedBuffer);
+
+      $('setCustomAudio').value = wavBase64;
+      $('setSound').value = 'custom';
+      
+      // แจ้งเตือนผู้ใช้ตามความยาวจริง
+      if (audioBuffer.duration > maxDuration) {
+        alert('ปรับแต่งเสียงเรียบร้อย! (ไฟล์ยาวเกิน 30 วินาที ระบบจึงตัดเหลือ 30 วินาทีแรกให้อัตโนมัติ)');
+      } else {
+        alert('ปรับแต่งเสียงเรียบร้อย! (ใช้ความยาวเต็ม ' + audioBuffer.duration.toFixed(1) + ' วินาที)');
+      }
+    } catch(err) {
+      alert('ไม่สามารถประมวลผลไฟล์เสียงนี้ได้ กรุณาลองใช้ไฟล์ MP3 หรือ WAV อื่น');
+    }
+  };
+  reader.readAsArrayBuffer(file);
 }
+
 function getCtx() {
   if (!sharedAudioCtx) {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
