@@ -1,4 +1,4 @@
-// ===== ระบบสั่งอาหารร้านค้า: Super Optimized Admin Panel + Clean Toppings Display =====
+// ===== ระบบสั่งอาหารร้านค้า: Options with Price (ตัวเลือกมีราคา) + Topping + Optimized =====
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -29,7 +29,7 @@ let db = {
   orders: [],
   tables: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
   toppings: [],
-  options: [], 
+  options: [], // ตัวเลือกมีราคา เช่น ขวดเล็ก +10, ขวดใหญ่ +25 { id, name, price, groupName }
   settings: { 
     theme: '#e85d04', 
     shopName: 'เลยมาตำ', 
@@ -95,7 +95,10 @@ async function initStorage() {
     if (m.hasOptionChoice === undefined) m.hasOptionChoice = m.options.length > 0;
   });
   db.toppings.forEach(t => { if (!t.category) t.category = 'ท็อปปิ้งทั่วไป'; });
-  db.options.forEach(o => { if (!o.groupName) o.groupName = 'ตัวเลือกทั่วไป'; });
+  db.options.forEach(o => { 
+    if (!o.groupName) o.groupName = 'ตัวเลือกทั่วไป'; 
+    if (o.price === undefined) o.price = 0; 
+  });
   save();
 }
 
@@ -169,8 +172,9 @@ function cleanTopping(b) {
 }
 function cleanOption(b) {
   const name = String(b.name || '').trim();
-  if (!name) return null;
-  return { name: name.slice(0, 60), groupName: String(b.groupName || '').trim() || 'ตัวเลือกทั่วไป' };
+  const price = Number(b.price);
+  if (!name || !Number.isFinite(price) || price < 0) return null;
+  return { name: name.slice(0, 60), price: price, groupName: String(b.groupName || '').trim() || 'ตัวเลือกทั่วไป' };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -337,7 +341,7 @@ const server = http.createServer(async (req, res) => {
                 return send(res, 400, { error: 'กรุณาเลือกตัวเลือกกลุ่ม "' + g + '" สำหรับเมนู "' + mm.name + '"' });
               }
               const foundOpt = db.options.find(x => x.id === chosen);
-              if (foundOpt) optionLines.push({ id: foundOpt.id, name: foundOpt.name, groupName: foundOpt.groupName });
+              if (foundOpt) optionLines.push({ id: foundOpt.id, name: foundOpt.name, price: foundOpt.price, groupName: foundOpt.groupName });
             }
           }
 
@@ -350,10 +354,16 @@ const server = http.createServer(async (req, res) => {
             }
           });
 
+          // คำนวณราคารวมต่อหน่วย (ราคาหลักเมนู + ราคาตัวเลือก + ราคาเพิ่มท็อปปิ้ง)
+          const optionsSum = optionLines.reduce((a, o) => a + o.price, 0);
+          const toppingsSum = toppingLines.reduce((a, t) => a + t.price, 0);
+          const unitPrice = mm.price + optionsSum + toppingsSum;
+
           lines.push({ 
             menuId: mm.id, 
             name: mm.name, 
-            price: mm.price, 
+            price: unitPrice, 
+            basePrice: mm.price,
             qty: qty,
             note: String(it.note || '').slice(0, 150),
             plara: plara,
@@ -367,7 +377,7 @@ const server = http.createServer(async (req, res) => {
           id: db.nextOrderId++,
           table: table,
           items: lines,
-          total: lines.reduce((s, l) => s + (l.price + l.toppings.reduce((a, t) => a + t.price, 0)) * l.qty, 0),
+          total: lines.reduce((s, l) => s + l.price * l.qty, 0),
           status: 'pending',
           createdAt: new Date().toISOString()
         };
@@ -431,7 +441,7 @@ const server = http.createServer(async (req, res) => {
 
 initStorage().then(() => {
   server.listen(PORT, '0.0.0.0', () => {
-    console.log('===== เซิร์ฟเวอร์ทำงานแล้ว (Super Optimized Admin) =====');
+    console.log('===== เซิร์ฟเวอร์ทำงานแล้ว (Options With Price) =====');
   });
 });
 
@@ -706,7 +716,8 @@ function add(id) {
         optHtml += '<p class="muted" style="margin:10px 0 4px; text-align:left;">📌 ' + esc(group) + ' (บังคับเลือก)</p>';
         optHtml += '<div class="choiceGroup" data-group="' + esc(group) + '">';
         byGroup[group].forEach(o => {
-          optHtml += '<button type="button" data-id="' + o.id + '" onclick="chooseOption(\\'' + esc(group).replace(/'/g, "\\\\'") + '\\', ' + o.id + ')">' + esc(o.name) + '</button>';
+          const priceText = o.price > 0 ? ' (+' + o.price + '฿)' : '';
+          optHtml += '<button type="button" data-id="' + o.id + '" onclick="chooseOption(\\'' + esc(group).replace(/'/g, "\\\\'") + '\\', ' + o.id + ')">' + esc(o.name) + priceText + '</button>';
         });
         optHtml += '</div>';
       });
@@ -816,19 +827,22 @@ function renderCart() {
     if (!m || !m.available) { delete cart[id]; return; }
     const toppingItems = (cart[id].toppings || []).map(tid => toppingsData.find(t => t.id === tid)).filter(Boolean);
     const optionItems = (cart[id].options || []).map(oid => optionsData.find(o => o.id === oid)).filter(Boolean);
+    
+    const optionSum = optionItems.reduce((s, o) => s + o.price, 0);
     const toppingSum = toppingItems.reduce((s, t) => s + t.price, 0);
-    total += (m.price + toppingSum) * cart[id].qty;
+    const itemUnitPrice = m.price + optionSum + toppingSum;
+    total += itemUnitPrice * cart[id].qty;
 
     let tagLine = '';
     if (cart[id].plara) tagLine += '🐟 ' + esc(cart[id].plara) + 'ปลาร้า';
     if (cart[id].spice) tagLine += (tagLine ? ' · ' : '') + '🔥 ' + esc(cart[id].spice);
 
     out += '<div style="border-bottom:1px solid #edf2f7; padding:8px 0;">' +
-      '<div class="row"><span><b>' + esc(m.name) + '</b></span><span>' +
+      '<div class="row"><span><b>' + esc(m.name) + '</b> (' + itemUnitPrice + '฿)</span><span>' +
       '<button onclick="changeQty(' + id + ',-1)">−</button> ' + cart[id].qty + ' ' +
       '<button onclick="changeQty(' + id + ',1)">+</button></span></div>' +
       (tagLine ? '<div style="font-size:0.8rem; color:#7c3aed;">' + tagLine + '</div>' : '') +
-      (optionItems.length ? '<div style="margin:2px 0; font-size:0.85rem; color:#4f46e5;">📌 ' + optionItems.map(o => esc(o.name)).join(', ') + '</div>' : '') +
+      (optionItems.length ? '<div style="margin:2px 0; font-size:0.85rem; color:#4f46e5;">📌 ' + optionItems.map(o => esc(o.name) + (o.price > 0 ? ' (+' + o.price + '฿)' : '')).join(', ') + '</div>' : '') +
       (toppingItems.length ? '<div style="margin:4px 0;">+เพิ่ม: ' + toppingItems.map(t => '<span class="tag-topping">' + esc(t.name) + '</span>').join(' ') + '</div>' : '') +
       '<input placeholder="หมายเหตุเฉพาะเมนูนี้ เช่น ไม่ใส่ผัก" value="' + esc(cart[id].note) + '" oninput="changeNote(' + id + ', this.value)" style="margin:4px 0 0; padding:6px; font-size:0.85rem;">' +
       '</div>';
@@ -879,7 +893,7 @@ async function loadTableOrders() {
         
         let detailHtml = '';
         if (tagLine) detailHtml += '<div style="color:#7c3aed; font-size:0.9rem;">- ' + tagLine + '</div>';
-        if (i.options && i.options.length) detailHtml += '<div style="color:#4f46e5; font-size:0.9rem;">- ตัวเลือก: ' + i.options.map(o => esc(o.name)).join(', ') + '</div>';
+        if (i.options && i.options.length) detailHtml += '<div style="color:#4f46e5; font-size:0.9rem;">- ตัวเลือก: ' + i.options.map(o => esc(o.name) + (o.price > 0 ? ' (+' + o.price + '฿)' : '')).join(', ') + '</div>';
         
         if (i.toppings && i.toppings.length) {
           detailHtml += '<div style="background:#e0f2fe; border-left:3px solid #0284c7; padding:3px 6px; margin:3px 0; border-radius:4px; color:#0369a1; font-size:0.9rem; font-weight:bold;">' +
@@ -928,7 +942,7 @@ const ADMIN_BODY = `
     <button data-tab="orders" class="active" onclick="switchTab('orders')">🛎️ ออเดอร์ลูกค้า</button>
     <button data-tab="tablesTab" onclick="switchTab('tablesTab')">🪑 จัดการโต๊ะ</button>
     <button data-tab="menuTab" class="adminOnly" onclick="switchTab('menuTab')">🍲 จัดการเมนูอาหาร</button>
-    <button data-tab="optionsTab" class="adminOnly" onclick="switchTab('optionsTab')">📌 จัดการตัวเลือกฟรี</button>
+    <button data-tab="optionsTab" class="adminOnly" onclick="switchTab('optionsTab')">📌 จัดการตัวเลือก</button>
     <button data-tab="toppingsTab" class="adminOnly" onclick="switchTab('toppingsTab')">➕ จัดการท็อปปิ้ง</button>
     <button data-tab="settingsTab" class="adminOnly" onclick="switchTab('settingsTab')">🎨 ตั้งค่าร้านและเสียง</button>
     <button data-tab="users" class="adminOnly" onclick="switchTab('users')">👥 จัดการผู้ใช้</button>
@@ -993,12 +1007,12 @@ const ADMIN_BODY = `
         <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mRec"> 🌟 ตั้งเป็นเมนูแนะนำ (ขึ้นโชว์ด้านบน)</label>
         <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mPlara"> 🐟 มีตัวเลือกใส่/ไม่ใส่ปลาร้า</label>
         <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mSpice"> 🌶️ มีตัวเลือกระดับความเผ็ด</label>
-        <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mOptionSwitch"> 📌 มีกลุ่มตัวเลือกฟรี (บังคับเลือก เช่น ชนิดน้ำอัดลม)</label>
+        <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mOptionSwitch"> 📌 มีกลุ่มตัวเลือก (บังคับเลือก เช่น ขนาดน้ำเปล่า)</label>
         <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mToppingSwitch"> ➕ มีตัวเลือกท็อปปิ้ง</label>
       </div>
 
       <div id="mOptionsContainerBox" hidden style="margin-bottom:12px;">
-        <label style="display:block; margin-top:8px; color:#4f46e5; font-weight:bold;">📌 เลือกกลุ่มตัวเลือกฟรีสำหรับเมนูนี้ (ติ๊กเลือกเพื่อบังคับให้ลูกค้าต้องเลือก):</label>
+        <label style="display:block; margin-top:8px; color:#4f46e5; font-weight:bold;">📌 เลือกกลุ่มตัวเลือกสำหรับเมนูนี้ (ติ๊กเลือกเพื่อบังคับให้ลูกค้าต้องเลือก):</label>
         <div id="mOptionsList" style="background:#eef2ff; padding:8px; border-radius:8px; margin:6px 0;"></div>
       </div>
 
@@ -1016,9 +1030,10 @@ const ADMIN_BODY = `
 
   <section id="optionsTab" class="tab" hidden>
     <form id="optionForm" class="panel narrow" style="max-width:500px; margin-bottom:20px;" onsubmit="submitOptionForm(event)">
-      <h3>📌 เพิ่มตัวเลือกฟรี (เช่น โค้ก, น้ำแดง)</h3>
-      <input id="oName" placeholder="ชื่อตัวเลือก เช่น โค้ก, แฟนต้าน้ำแดง" required>
-      <label style="display:block; margin-top:8px;">ชื่อกลุ่มตัวเลือก (เช่น น้ำอัดลม):</label>
+      <h3>📌 เพิ่มตัวเลือก (เช่น ขวดเล็ก 10฿, ขวดใหญ่ 25฿)</h3>
+      <input id="oName" placeholder="ชื่อตัวเลือก เช่น ขวดเล็ก, ขวดใหญ่" required>
+      <input id="oPrice" type="number" min="0" placeholder="ราคาเพิ่ม (บาท) เช่น 10, 25" required>
+      <label style="display:block; margin-top:8px;">ชื่อกลุ่มตัวเลือก (เช่น ขนาดน้ำเปล่า):</label>
       <div style="display:flex; gap:8px; align-items:center;">
         <select id="oGroup" style="margin:6px 0; flex:1;">
           <option value="">-- เลือกหรือเพิ่มกลุ่มใหม่ --</option>
@@ -1027,7 +1042,7 @@ const ADMIN_BODY = `
       </div>
       <button type="submit" class="primary" style="margin-top:10px;">เพิ่มตัวเลือก</button>
     </form>
-    <h3>รายการตัวเลือกฟรีทั้งหมด (แยกตามกลุ่ม)</h3>
+    <h3>รายการตัวเลือกทั้งหมด (แยกตามกลุ่ม)</h3>
     <div id="optionByCategory"></div>
   </section>
 
@@ -1339,7 +1354,6 @@ async function loadOrders() {
     const str = JSON.stringify(orders);
     const isFirst = lastOrdersCacheStr === '';
     
-    // ถ้าข้อมูลออเดอร์ไม่เปลี่ยนเลย ให้ข้ามการเรนเดอร์ใหม่ทันที (แก้ปัญหาหน้าแอดมินหน่วง)
     if (!isFirst && str === lastOrdersCacheStr) return;
     
     allOrdersCache = orders;
@@ -1399,7 +1413,7 @@ function renderOrdersView() {
         
         let detailHtml = '';
         if (tagLine) detailHtml += '<div style="color:#7c3aed; font-size:0.9rem;">- ' + tagLine + '</div>';
-        if (i.options && i.options.length) detailHtml += '<div style="color:#4f46e5; font-size:0.9rem;">- ตัวเลือก: ' + i.options.map(o => esc(o.name)).join(', ') + '</div>';
+        if (i.options && i.options.length) detailHtml += '<div style="color:#4f46e5; font-size:0.9rem;">- ตัวเลือก: ' + i.options.map(o => esc(o.name) + (o.price > 0 ? ' (+' + o.price + '฿)' : '')).join(', ') + '</div>';
         
         if (i.toppings && i.toppings.length) {
           detailHtml += '<div style="background:#e0f2fe; border-left:3px solid #0284c7; padding:3px 6px; margin:3px 0; border-radius:4px; color:#0369a1; font-size:0.9rem; font-weight:bold;">' +
@@ -1490,9 +1504,9 @@ async function clearAllOrders() {
   catch (e) { alert(e.message); }
 }
 
-setInterval(loadOrders, 8000); // ขยายเวลาพูลลิ่งให้เสถียรและเบาเครื่องขึ้น (ทุก 8 วินาที)
+setInterval(loadOrders, 8000);
 
-// จัดการตัวเลือกฟรี (Options)
+// จัดการตัวเลือก (มียอดราคาเพิ่มได้)
 async function loadOptions() {
   try {
     optionsData = await api('/api/options');
@@ -1507,20 +1521,20 @@ async function loadOptions() {
     let html = '';
     Object.keys(byGroup).forEach(group => {
       html += '<div class="panel" style="margin-bottom:10px;"><h4 style="margin:0 0 8px;">📌 ' + esc(group) + '</h4><div style="overflow-x:auto;"><table>' +
-        '<tr><th>ชื่อตัวเลือก</th><th>จัดการ</th></tr>';
+        '<tr><th>ชื่อตัวเลือก</th><th>ราคาเพิ่ม</th><th>จัดการ</th></tr>';
       byGroup[group].forEach(o => {
-        html += '<tr><td><b>' + esc(o.name) + '</b></td><td><button type="button" onclick="delOption(' + o.id + ')" style="color:red;">ลบ</button></td></tr>';
+        html += '<tr><td><b>' + esc(o.name) + '</b></td><td>+' + o.price + '฿</td><td><button type="button" onclick="delOption(' + o.id + ')" style="color:red;">ลบ</button></td></tr>';
       });
       html += '</table></div></div>';
     });
-    if ($('optionByCategory')) $('optionByCategory').innerHTML = html || '<p class="muted">ยังไม่มีตัวเลือกฟรีในระบบ</p>';
+    if ($('optionByCategory')) $('optionByCategory').innerHTML = html || '<p class="muted">ยังไม่มีตัวเลือกในระบบ</p>';
 
     renderMenuOptionsCheckboxes();
   } catch(e) {}
 }
 
 function addNewOptionGroupPrompt() {
-  const newGroup = prompt('กรอกชื่อกลุ่มตัวเลือกใหม่ (เช่น น้ำอัดลม):');
+  const newGroup = prompt('กรอกชื่อกลุ่มตัวเลือกใหม่ (เช่น ขนาดน้ำเปล่า):');
   if (!newGroup || !newGroup.trim()) return;
   const trimmed = newGroup.trim();
   const select = $('oGroup');
@@ -1537,7 +1551,7 @@ function addNewOptionGroupPrompt() {
 async function submitOptionForm(e) {
   e.preventDefault();
   try {
-    await api('/api/options', { method: 'POST', body: { name: $('oName').value, groupName: $('oGroup').value } });
+    await api('/api/options', { method: 'POST', body: { name: $('oName').value, price: Number($('oPrice').value), groupName: $('oGroup').value } });
     $('optionForm').reset();
     loadOptions();
     alert('เพิ่มตัวเลือกสำเร็จ!');
@@ -1553,7 +1567,7 @@ function renderMenuOptionsCheckboxes() {
   const el = $('mOptionsList');
   if (!el) return;
   if (!optionsData.length) {
-    el.innerHTML = '<p class="muted" style="margin:4px 0; font-size:0.9rem;">ยังไม่มีตัวเลือกฟรีในระบบ (เพิ่มได้ที่แท็บ "จัดการตัวเลือกฟรี")</p>';
+    el.innerHTML = '<p class="muted" style="margin:4px 0; font-size:0.9rem;">ยังไม่มีตัวเลือกในระบบ (เพิ่มได้ที่แท็บ "จัดการตัวเลือก")</p>';
     return;
   }
   const byGroup = {};
@@ -1570,7 +1584,7 @@ function renderMenuOptionsCheckboxes() {
     html += groupItems.map(o =>
       '<label style="display:flex; align-items:center; gap:8px; padding:3px 0; font-weight:normal; color:#212529;"><input type="checkbox" value="' + o.id + '" ' +
       (selectedMenuOptions.includes(o.id) ? 'checked' : '') + ' onchange="toggleMenuOption(' + o.id + ', this.checked)"> ' +
-      esc(o.name) + '</label>'
+      esc(o.name) + ' (+' + o.price + ' บาท)</label>'
     ).join('');
     html += '</div></div>';
   });
