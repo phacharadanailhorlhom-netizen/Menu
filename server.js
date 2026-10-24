@@ -1,4 +1,4 @@
-// ===== ระบบสั่งอาหารร้านค้า: Optimized Version (Fast Polling, Category Topping Select, Grouped Menu) =====
+// ===== ระบบสั่งอาหารร้านค้า: Options (ตัวเลือกบังคับฟรีไม่มีราคาเพิ่ม) + Optimized + Topping Category =====
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -29,6 +29,7 @@ let db = {
   orders: [],
   tables: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
   toppings: [],
+  options: [], 
   settings: { 
     theme: '#e85d04', 
     shopName: 'เลยมาตำ', 
@@ -41,7 +42,8 @@ let db = {
   },
   nextMenuId: 1,
   nextOrderId: 1,
-  nextToppingId: 1
+  nextToppingId: 1,
+  nextOptionId: 1
 };
 
 async function initStorage() {
@@ -73,6 +75,7 @@ async function initStorage() {
   if (!db.orders || !Array.isArray(db.orders)) db.orders = [];
   if (!db.tables || !Array.isArray(db.tables)) db.tables = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
   if (!db.toppings || !Array.isArray(db.toppings)) db.toppings = [];
+  if (!db.options || !Array.isArray(db.options)) db.options = [];
   if (!db.settings) db.settings = {};
   if (!db.settings.shopName) db.settings.shopName = 'เลยมาตำ';
   if (!db.settings.theme) db.settings.theme = '#e85d04';
@@ -81,14 +84,18 @@ async function initStorage() {
   if (!db.settings.loopInterval) db.settings.loopInterval = '5';
   if (!db.settings.categoryOrder || !Array.isArray(db.settings.categoryOrder)) db.settings.categoryOrder = [];
   if (!db.nextToppingId) db.nextToppingId = (db.toppings.length ? Math.max(...db.toppings.map(t => t.id)) + 1 : 1);
+  if (!db.nextOptionId) db.nextOptionId = (db.options.length ? Math.max(...db.options.map(o => o.id)) + 1 : 1);
 
   db.menu.forEach(m => { 
     if (m.hasPlaraOption === undefined) m.hasPlaraOption = false; 
     if (m.hasSpiceOption === undefined) m.hasSpiceOption = !!m.hasPlaraOption;
     if (!Array.isArray(m.toppings)) m.toppings = [];
+    if (!Array.isArray(m.options)) m.options = [];
     if (m.hasToppingOption === undefined) m.hasToppingOption = m.toppings.length > 0;
+    if (m.hasOptionChoice === undefined) m.hasOptionChoice = m.options.length > 0;
   });
   db.toppings.forEach(t => { if (!t.category) t.category = 'ท็อปปิ้งทั่วไป'; });
+  db.options.forEach(o => { if (!o.groupName) o.groupName = 'ตัวเลือกทั่วไป'; });
   save();
 }
 
@@ -136,6 +143,9 @@ function cleanMenu(b) {
   const toppingIds = Array.isArray(b.toppings)
     ? b.toppings.map(Number).filter(id => db.toppings.some(t => t.id === id))
     : [];
+  const optionIds = Array.isArray(b.options)
+    ? b.options.map(Number).filter(id => db.options.some(o => o.id === id))
+    : [];
   return {
     name: name.slice(0, 100),
     price: price,
@@ -146,7 +156,9 @@ function cleanMenu(b) {
     hasPlaraOption: !!b.hasPlaraOption,
     hasSpiceOption: !!b.hasSpiceOption,
     hasToppingOption: !!b.hasToppingOption,
-    toppings: toppingIds
+    hasOptionChoice: !!b.hasOptionChoice,
+    toppings: toppingIds,
+    options: optionIds
   };
 }
 function cleanTopping(b) {
@@ -154,6 +166,11 @@ function cleanTopping(b) {
   const price = Number(b.price);
   if (!name || !Number.isFinite(price) || price < 0) return null;
   return { name: name.slice(0, 60), price: price, category: String(b.category || '').trim() || 'ท็อปปิ้งทั่วไป' };
+}
+function cleanOption(b) {
+  const name = String(b.name || '').trim();
+  if (!name) return null;
+  return { name: name.slice(0, 60), groupName: String(b.groupName || '').trim() || 'ตัวเลือกทั่วไป' };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -206,21 +223,31 @@ const server = http.createServer(async (req, res) => {
         db.toppings.push(t); save();
         return send(res, 201, t);
       }
-      if (method === 'PUT' && id) {
-        const i = db.toppings.findIndex(x => x.id === Number(id));
-        if (i < 0) return send(res, 404, { error: 'ไม่พบท็อปปิ้ง' });
-        const t = cleanTopping(body);
-        if (!t) return send(res, 400, { error: 'ข้อมูลท็อปปิ้งไม่ถูกต้อง' });
-        t.id = db.toppings[i].id;
-        db.toppings[i] = t; save();
-        return send(res, 200, t);
-      }
       if (method === 'DELETE' && id) {
         const tid = Number(id);
         db.toppings = db.toppings.filter(t => t.id !== tid);
         db.menu.forEach(m => { m.toppings = (m.toppings || []).filter(x => x !== tid); });
         save();
         return send(res, 200, db.toppings);
+      }
+    }
+
+    if (part === 'options') {
+      if (method === 'GET') return send(res, 200, db.options);
+      if (!need('admin')) return;
+      if (method === 'POST' && !id) {
+        const o = cleanOption(body);
+        if (!o) return send(res, 400, { error: 'ข้อมูลตัวเลือกไม่ถูกต้อง' });
+        o.id = db.nextOptionId++;
+        db.options.push(o); save();
+        return send(res, 201, o);
+      }
+      if (method === 'DELETE' && id) {
+        const oid = Number(id);
+        db.options = db.options.filter(o => o.id !== oid);
+        db.menu.forEach(m => { m.options = (m.options || []).filter(x => x !== oid); });
+        save();
+        return send(res, 200, db.options);
       }
     }
 
@@ -297,6 +324,25 @@ const server = http.createServer(async (req, res) => {
             if (!spice) return send(res, 400, { error: 'กรุณาเลือกระดับความเผ็ดก่อนสั่งเมนู "' + mm.name + '"' });
           }
 
+          // ตรวจสอบตัวเลือกบังคับ (Options) ครบทุกกลุ่มไหม
+          const optionLines = [];
+          if (mm.hasOptionChoice && (mm.options || []).length > 0) {
+            const menuOpts = db.options.filter(o => (mm.options || []).includes(o.id));
+            const groups = [...new Set(menuOpts.map(o => o.groupName || 'ตัวเลือก'))];
+            const submittedOpts = Array.isArray(it.options) ? it.options.map(Number) : [];
+
+            for (const g of groups) {
+              const groupOptIds = menuOpts.filter(o => (o.groupName || 'ตัวเลือก') === g).map(o => o.id);
+              const chosen = submittedOpts.find(id => groupOptIds.includes(id));
+              if (!chosen) {
+                return send(res, 400, { error: 'กรุณาเลือกตัวเลือกกลุ่ม "' + g + '" สำหรับเมนู "' + mm.name + '"' });
+              }
+              const foundOpt = db.options.find(x => x.id === chosen);
+              if (foundOpt) optionLines.push({ id: foundOpt.id, name: foundOpt.name, groupName: foundOpt.groupName });
+            }
+          }
+
+          // ท็อปปิ้ง (มีราคาเพิ่ม - ไม่บังคับ)
           const selectedToppingIds = (mm.hasToppingOption && Array.isArray(it.toppings)) ? it.toppings.map(Number) : [];
           const toppingLines = [];
           selectedToppingIds.forEach(tid => {
@@ -314,7 +360,8 @@ const server = http.createServer(async (req, res) => {
             note: String(it.note || '').slice(0, 150),
             plara: plara,
             spice: spice,
-            toppings: toppingLines
+            toppings: toppingLines,
+            options: optionLines
           });
         }
         if (!db.nextOrderId) db.nextOrderId = Math.max(...db.orders.map(o => o.id), 0) + 1;
@@ -386,7 +433,7 @@ const server = http.createServer(async (req, res) => {
 
 initStorage().then(() => {
   server.listen(PORT, '0.0.0.0', () => {
-    console.log('===== เซิร์ฟเวอร์ทำงานแล้ว (Optimized) =====');
+    console.log('===== เซิร์ฟเวอร์ทำงานแล้ว (Mandatory Options Added) =====');
   });
 });
 
@@ -429,6 +476,7 @@ th { background: #f1f5f9; }
 .tag-plara { background: #7c3aed; color: #fff; font-size: 0.7rem; padding: 2px 7px; border-radius: 8px; display: inline-block; margin-left: 4px; }
 .tag-spice { background: #ea580c; color: #fff; font-size: 0.7rem; padding: 2px 7px; border-radius: 8px; display: inline-block; margin-left: 4px; }
 .tag-topping { background: #0891b2; color: #fff; font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; display: inline-block; margin: 2px 4px 0 0; }
+.tag-option { background: #4f46e5; color: #fff; font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; display: inline-block; margin: 2px 4px 0 0; }
 [hidden] { display: none !important; }
 @keyframes pulseOrder { 0% { box-shadow: 0 0 0 0 rgba(245,158,11,.55); } 70% { box-shadow: 0 0 0 10px rgba(245,158,11,0); } 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0); } }
 .order-new { border-left: 5px solid #f59e0b !important; animation: pulseOrder 1.6s infinite; }
@@ -540,6 +588,10 @@ const SHOP_BODY = `
       </div>
     </div>
 
+    <div id="optionSection" hidden>
+      <div id="optionGroupsContainer"></div>
+    </div>
+
     <div id="toppingSection" hidden>
       <p class="muted" style="margin:10px 0 4px; text-align:left;">➕ ท็อปปิ้งเสริม (ไม่บังคับ)</p>
       <div id="toppingList"></div>
@@ -554,11 +606,13 @@ const SHOP_JS = `
 const cart = {};
 let menu = [];
 let toppingsData = [];
+let optionsData = [];
 let activeCat = 'all';
 let pendingAddId = null;
 let pendingPlara = null;
 let pendingSpice = null;
 let pendingToppings = [];
+let pendingOptions = {}; 
 $('table').value = new URLSearchParams(location.search).get('table') || localStorage.getItem('table') || '1';
 
 async function loadMenu() {
@@ -566,6 +620,7 @@ async function loadMenu() {
   try {
     menu = await api('/api/menu');
     toppingsData = await api('/api/toppings');
+    optionsData = await api('/api/options');
   } catch(e) {}
   renderCatTabs();
   renderMenu(menu);
@@ -628,17 +683,40 @@ function add(id) {
   const m = menu.find(x => x.id === id);
   if (!m) return;
   const showToppings = m.hasToppingOption && (m.toppings || []).length > 0;
-  if (m.hasPlaraOption || m.hasSpiceOption || showToppings) {
+  const showOptions = m.hasOptionChoice && (m.options || []).length > 0;
+  
+  if (m.hasPlaraOption || m.hasSpiceOption || showToppings || showOptions) {
     pendingAddId = id;
     pendingPlara = null;
     pendingSpice = null;
     pendingToppings = [];
+    pendingOptions = {};
     $('plaraItemName').textContent = m.name;
 
     $('plaraOnlySection').hidden = !m.hasPlaraOption;
     $('spiceOnlySection').hidden = !m.hasSpiceOption;
     document.querySelectorAll('#plaraChoiceGroup button').forEach(b => b.classList.remove('selected'));
     document.querySelectorAll('#spiceChoiceGroup button').forEach(b => b.classList.remove('selected'));
+
+    if (showOptions) {
+      const optItems = optionsData.filter(o => (m.options || []).includes(o.id));
+      const byGroup = {};
+      optItems.forEach(o => { const g = o.groupName || 'ตัวเลือก'; (byGroup[g] = byGroup[g] || []).push(o); });
+      
+      let optHtml = '';
+      Object.keys(byGroup).forEach(group => {
+        optHtml += '<p class="muted" style="margin:10px 0 4px; text-align:left;">📌 ' + esc(group) + ' (บังคับเลือก)</p>';
+        optHtml += '<div class="choiceGroup" data-group="' + esc(group) + '">';
+        byGroup[group].forEach(o => {
+          optHtml += '<button type="button" data-id="' + o.id + '" onclick="chooseOption(\\'' + esc(group).replace(/'/g, "\\\\'") + '\\', ' + o.id + ')">' + esc(o.name) + '</button>';
+        });
+        optHtml += '</div>';
+      });
+      $('optionGroupsContainer').innerHTML = optHtml;
+      $('optionSection').hidden = false;
+    } else {
+      $('optionSection').hidden = true;
+    }
 
     if (showToppings) {
       const items = toppingsData.filter(t => (m.toppings || []).includes(t.id));
@@ -662,7 +740,7 @@ function add(id) {
     $('plaraModal').hidden = false;
     return;
   }
-  doAdd(id, null, null, []);
+  doAdd(id, null, null, [], []);
 }
 
 function closePlaraModal() { $('plaraModal').hidden = true; pendingAddId = null; }
@@ -677,6 +755,14 @@ function chooseSpice(v) {
   document.querySelectorAll('#spiceChoiceGroup button').forEach(b => b.classList.toggle('selected', b.dataset.v === v));
   updateConfirmState();
 }
+function chooseOption(group, id) {
+  pendingOptions[group] = id;
+  const container = document.querySelector('.choiceGroup[data-group="' + group + '"]');
+  if (container) {
+    container.querySelectorAll('button').forEach(b => b.classList.toggle('selected', Number(b.dataset.id) === id));
+  }
+  updateConfirmState();
+}
 function toggleTopping(id, checked) {
   if (checked) { if (!pendingToppings.includes(id)) pendingToppings.push(id); }
   else { pendingToppings = pendingToppings.filter(x => x !== id); }
@@ -686,7 +772,15 @@ function updateConfirmState() {
   if (!m) return;
   const plaraOk = !m.hasPlaraOption || !!pendingPlara;
   const spiceOk = !m.hasSpiceOption || !!pendingSpice;
-  $('confirmAddBtn').disabled = !(plaraOk && spiceOk);
+  
+  let optionsOk = true;
+  if (m.hasOptionChoice && (m.options || []).length > 0) {
+    const optItems = optionsData.filter(o => (m.options || []).includes(o.id));
+    const groups = [...new Set(optItems.map(o => o.groupName || 'ตัวเลือก'))];
+    groups.forEach(g => { if (!pendingOptions[g]) optionsOk = false; });
+  }
+
+  $('confirmAddBtn').disabled = !(plaraOk && spiceOk && optionsOk);
 }
 
 function confirmAdd() {
@@ -694,13 +788,23 @@ function confirmAdd() {
   const m = menu.find(x => x.id === pendingAddId);
   if (m && m.hasPlaraOption && !pendingPlara) { alert('กรุณาเลือกใส่/ไม่ใส่ปลาร้าก่อนนะครับ'); return; }
   if (m && m.hasSpiceOption && !pendingSpice) { alert('กรุณาเลือกระดับความเผ็ดก่อนนะครับ'); return; }
-  doAdd(pendingAddId, pendingPlara, pendingSpice, pendingToppings.slice());
+  
+  if (m && m.hasOptionChoice && (m.options || []).length > 0) {
+    const optItems = optionsData.filter(o => (m.options || []).includes(o.id));
+    const groups = [...new Set(optItems.map(o => o.groupName || 'ตัวเลือก'))];
+    for (const g of groups) {
+      if (!pendingOptions[g]) { alert('กรุณาเลือกตัวเลือกกลุ่ม "' + g + '" ด้วยครับ'); return; }
+    }
+  }
+
+  const optIds = Object.values(pendingOptions);
+  doAdd(pendingAddId, pendingPlara, pendingSpice, pendingToppings.slice(), optIds);
   $('plaraModal').hidden = true;
   pendingAddId = null;
 }
 
-function doAdd(id, plara, spice, toppingIds) {
-  if (!cart[id]) cart[id] = { qty: 1, note: '', plara: plara, spice: spice, toppings: toppingIds || [] };
+function doAdd(id, plara, spice, toppingIds, optionIds) {
+  if (!cart[id]) cart[id] = { qty: 1, note: '', plara: plara, spice: spice, toppings: toppingIds || [], options: optionIds || [] };
   else { cart[id].qty++; }
   renderCart();
 }
@@ -713,6 +817,7 @@ function renderCart() {
     const m = menu.find(x => x.id == id);
     if (!m || !m.available) { delete cart[id]; return; }
     const toppingItems = (cart[id].toppings || []).map(tid => toppingsData.find(t => t.id === tid)).filter(Boolean);
+    const optionItems = (cart[id].options || []).map(oid => optionsData.find(o => o.id === oid)).filter(Boolean);
     const toppingSum = toppingItems.reduce((s, t) => s + t.price, 0);
     total += (m.price + toppingSum) * cart[id].qty;
 
@@ -725,6 +830,7 @@ function renderCart() {
       '<button onclick="changeQty(' + id + ',-1)">−</button> ' + cart[id].qty + ' ' +
       '<button onclick="changeQty(' + id + ',1)">+</button></span></div>' +
       (tagLine ? '<div style="font-size:0.8rem; color:#7c3aed;">' + tagLine + '</div>' : '') +
+      (optionItems.length ? '<div style="margin:2px 0; font-size:0.85rem; color:#4f46e5;">📌 ' + optionItems.map(o => esc(o.name)).join(', ') + '</div>' : '') +
       (toppingItems.length ? '<div style="margin:4px 0;">' + toppingItems.map(t => '<span class="tag-topping">' + esc(t.name) + '</span>').join('') + '</div>' : '') +
       '<input placeholder="หมายเหตุเฉพาะเมนูนี้ เช่น ไม่ใส่ผัก" value="' + esc(cart[id].note) + '" oninput="changeNote(' + id + ', this.value)" style="margin:4px 0 0; padding:6px; font-size:0.85rem;">' +
       '</div>';
@@ -736,7 +842,15 @@ function renderCart() {
 $('orderBtn').onclick = async function () {
   const table = $('table').value.trim();
   if (!table) return alert('กรุณาใส่หมายเลขโต๊ะ');
-  const items = Object.keys(cart).map(id => ({ menuId: Number(id), qty: cart[id].qty, note: cart[id].note, plara: cart[id].plara, spice: cart[id].spice, toppings: cart[id].toppings || [] }));
+  const items = Object.keys(cart).map(id => ({ 
+    menuId: Number(id), 
+    qty: cart[id].qty, 
+    note: cart[id].note, 
+    plara: cart[id].plara, 
+    spice: cart[id].spice, 
+    toppings: cart[id].toppings || [],
+    options: cart[id].options || [] 
+  }));
   if (!items.length) return alert('ตะกร้าว่างเปล่า');
   try {
     const order = await api('/api/orders', { method: 'POST', body: { table: table, items: items } });
@@ -755,7 +869,7 @@ async function loadTableOrders() {
   try {
     const orders = await api('/api/orders/table?no=' + encodeURIComponent(table));
     const str = JSON.stringify(orders);
-    if (str === lastTableOrdersCacheStr) return; // ข้ามการเรนเดอร์ถ้าข้อมูลไม่เปลี่ยน เพื่อความลื่นไหล
+    if (str === lastTableOrdersCacheStr) return;
     lastTableOrdersCacheStr = str;
 
     $('myTableOrders').innerHTML = orders.map(o => {
@@ -766,6 +880,7 @@ async function loadTableOrders() {
         if (i.spice) tagLine += (tagLine ? ' · ' : '') + esc(i.spice);
         s += '<li>' + esc(i.name) + ' × <b>' + i.qty + '</b>' +
           (tagLine ? ' <span style="color:#7c3aed;">(' + tagLine + ')</span>' : '') +
+          ((i.options && i.options.length) ? ' <span style="color:#4f46e5;">[' + i.options.map(o => esc(o.name)).join(', ') + ']</span>' : '') +
           ((i.toppings && i.toppings.length) ? ' <span style="color:#0891b2;">[' + i.toppings.map(t => esc(t.name)).join(', ') + ']</span>' : '') +
           (i.note ? ' <span class="muted">(' + esc(i.note) + ')</span>' : '') + '</li>';
       });
@@ -776,8 +891,8 @@ async function loadTableOrders() {
 }
 loadMenu();
 loadTableOrders();
-setInterval(loadTableOrders, 10000); // ปรับเป็นทุก 10 วิ เพื่อลดภาระเครื่อง
-setInterval(loadMenu, 60000);       // ปรับเป็นทุก 1 นาที
+setInterval(loadTableOrders, 10000);
+setInterval(loadMenu, 60000);
 `;
 
 const ADMIN_BODY = `
@@ -807,6 +922,7 @@ const ADMIN_BODY = `
     <button data-tab="orders" class="active" onclick="switchTab('orders')">🛎️ ออเดอร์ลูกค้า</button>
     <button data-tab="tablesTab" onclick="switchTab('tablesTab')">🪑 จัดการโต๊ะ</button>
     <button data-tab="menuTab" class="adminOnly" onclick="switchTab('menuTab')">🍲 จัดการเมนูอาหาร</button>
+    <button data-tab="optionsTab" class="adminOnly" onclick="switchTab('optionsTab')">📌 จัดการตัวเลือกฟรี</button>
     <button data-tab="toppingsTab" class="adminOnly" onclick="switchTab('toppingsTab')">➕ จัดการท็อปปิ้ง</button>
     <button data-tab="settingsTab" class="adminOnly" onclick="switchTab('settingsTab')">🎨 ตั้งค่าร้านและเสียง</button>
     <button data-tab="users" class="adminOnly" onclick="switchTab('users')">👥 จัดการผู้ใช้</button>
@@ -871,10 +987,16 @@ const ADMIN_BODY = `
         <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mRec"> 🌟 ตั้งเป็นเมนูแนะนำ (ขึ้นโชว์ด้านบน)</label>
         <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mPlara"> 🐟 มีตัวเลือกใส่/ไม่ใส่ปลาร้า</label>
         <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mSpice"> 🌶️ มีตัวเลือกระดับความเผ็ด</label>
+        <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mOptionSwitch"> 📌 มีกลุ่มตัวเลือกฟรี (บังคับเลือก เช่น ชนิดน้ำอัดลม)</label>
         <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="mToppingSwitch"> ➕ มีตัวเลือกท็อปปิ้ง</label>
       </div>
 
-      <label style="display:block; margin-top:8px;">➕ ท็อปปิ้งที่เลือกได้สำหรับเมนูนี้ (ติ๊กเลือกทั้งหมวด หรือเลือกแยกรายตัวได้):</label>
+      <div id="mOptionsContainerBox" hidden style="margin-bottom:12px;">
+        <label style="display:block; margin-top:8px; color:#4f46e5; font-weight:bold;">📌 เลือกกลุ่มตัวเลือกฟรีสำหรับเมนูนี้ (ติ๊กเลือกเพื่อบังคับให้ลูกค้าต้องเลือก):</label>
+        <div id="mOptionsList" style="background:#eef2ff; padding:8px; border-radius:8px; margin:6px 0;"></div>
+      </div>
+
+      <label style="display:block; margin-top:8px;">➕ ท็อปปิ้งที่เลือกได้สำหรับเมนูนี้:</label>
       <div id="mToppingsList" style="background:#f1f5f9; padding:8px; border-radius:8px; margin:6px 0;">
         <p class="muted" style="margin:4px 0; font-size:0.9rem;">กำลังโหลดรายการท็อปปิ้ง...</p>
       </div>
@@ -884,6 +1006,23 @@ const ADMIN_BODY = `
     </form>
     <h3>รายการเมนูทั้งหมดในระบบ (แยกตามหมวดหมู่)</h3>
     <div id="menuByCategory"></div>
+  </section>
+
+  <section id="optionsTab" class="tab" hidden>
+    <form id="optionForm" class="panel narrow" style="max-width:500px; margin-bottom:20px;" onsubmit="submitOptionForm(event)">
+      <h3>📌 เพิ่มตัวเลือกฟรี (เช่น โค้ก, น้ำแดง)</h3>
+      <input id="oName" placeholder="ชื่อตัวเลือก เช่น โค้ก, แฟนต้าน้ำแดง" required>
+      <label style="display:block; margin-top:8px;">ชื่อกลุ่มตัวเลือก (เช่น น้ำอัดลม):</label>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <select id="oGroup" style="margin:6px 0; flex:1;">
+          <option value="">-- เลือกหรือเพิ่มกลุ่มใหม่ --</option>
+        </select>
+        <button type="button" onclick="addNewOptionGroupPrompt()" style="white-space:nowrap; padding:10px;">➕ เพิ่มกลุ่มใหม่</button>
+      </div>
+      <button type="submit" class="primary" style="margin-top:10px;">เพิ่มตัวเลือก</button>
+    </form>
+    <h3>รายการตัวเลือกฟรีทั้งหมด (แยกตามกลุ่ม)</h3>
+    <div id="optionByCategory"></div>
   </section>
 
   <section id="toppingsTab" class="tab" hidden>
@@ -990,8 +1129,9 @@ const ADMIN_BODY = `
 `;
 
 const ADMIN_JS = `
-let me = null, menuData = [], allOrdersCache = [], tablesData = [], toppingsData = [];
+let me = null, menuData = [], allOrdersCache = [], tablesData = [], toppingsData = [], optionsData = [];
 let selectedMenuToppings = [];
+let selectedMenuOptions = [];
 let menuCatCollapsed = {};
 let lastOrderCount = -1;
 let loopAlertTimer = null;
@@ -1135,7 +1275,7 @@ async function init() {
   loadOrders();
   loadTables();
   loadSettingsForm();
-  if (me.role === 'admin') { loadMenu(); loadUsers(); loadToppings(); }
+  if (me.role === 'admin') { loadMenu(); loadUsers(); loadToppings(); loadOptions(); }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1164,6 +1304,7 @@ function switchTab(tabId) {
   });
   if (tabId === 'tablesTab') loadTables();
   if (tabId === 'toppingsTab') loadToppings();
+  if (tabId === 'optionsTab') loadOptions();
 }
 
 function setOrderDate(mode, val) {
@@ -1246,6 +1387,7 @@ function renderOrdersView() {
         if (i.spice) tagLine += (tagLine ? ' · ' : '') + esc(i.spice);
         s += '<li>' + esc(i.name) + ' × <b>' + i.qty + '</b>' +
           (tagLine ? ' <span style="color:#7c3aed;">(' + tagLine + ')</span>' : '') +
+          ((i.options && i.options.length) ? ' <span style="color:#4f46e5;">[' + i.options.map(o => esc(o.name)).join(', ') + ']</span>' : '') +
           ((i.toppings && i.toppings.length) ? ' <span style="color:#0891b2;">[' + i.toppings.map(t => esc(t.name)).join(', ') + ']</span>' : '') +
           (i.note ? ' <span class="muted">(' + esc(i.note) + ')</span>' : '') + '</li>';
       });
@@ -1329,8 +1471,112 @@ async function clearAllOrders() {
   catch (e) { alert(e.message); }
 }
 
-setInterval(loadOrders, 6000); // ปรับความเร็วสำรวจออเดอร์แอดมินให้สมดุล (ทุก 6 วิ)
+setInterval(loadOrders, 6000);
 
+// จัดการตัวเลือกฟรี (Options)
+async function loadOptions() {
+  try {
+    optionsData = await api('/api/options');
+    const groups = [...new Set(optionsData.map(o => o.groupName || 'ตัวเลือกทั่วไป'))];
+    let groupOpts = '<option value="">-- เลือกหรือเพิ่มกลุ่มใหม่ --</option>';
+    groups.forEach(g => { groupOpts += '<option value="' + esc(g) + '">' + esc(g) + '</option>'; });
+    if ($('oGroup')) $('oGroup').innerHTML = groupOpts;
+
+    const byGroup = {};
+    optionsData.forEach(o => { const g = o.groupName || 'ตัวเลือกทั่วไป'; (byGroup[g] = byGroup[g] || []).push(o); });
+
+    let html = '';
+    Object.keys(byGroup).forEach(group => {
+      html += '<div class="panel" style="margin-bottom:10px;"><h4 style="margin:0 0 8px;">📌 ' + esc(group) + '</h4><div style="overflow-x:auto;"><table>' +
+        '<tr><th>ชื่อตัวเลือก</th><th>จัดการ</th></tr>';
+      byGroup[group].forEach(o => {
+        html += '<tr><td><b>' + esc(o.name) + '</b></td><td><button type="button" onclick="delOption(' + o.id + ')" style="color:red;">ลบ</button></td></tr>';
+      });
+      html += '</table></div></div>';
+    });
+    if ($('optionByCategory')) $('optionByCategory').innerHTML = html || '<p class="muted">ยังไม่มีตัวเลือกฟรีในระบบ</p>';
+
+    renderMenuOptionsCheckboxes();
+  } catch(e) {}
+}
+
+function addNewOptionGroupPrompt() {
+  const newGroup = prompt('กรอกชื่อกลุ่มตัวเลือกใหม่ (เช่น น้ำอัดลม):');
+  if (!newGroup || !newGroup.trim()) return;
+  const trimmed = newGroup.trim();
+  const select = $('oGroup');
+  let exists = false;
+  for (let i = 0; i < select.options.length; i++) { if (select.options[i].value === trimmed) { exists = true; break; } }
+  if (!exists) {
+    const opt = document.createElement('option');
+    opt.value = trimmed; opt.textContent = trimmed;
+    select.appendChild(opt);
+  }
+  select.value = trimmed;
+}
+
+async function submitOptionForm(e) {
+  e.preventDefault();
+  try {
+    await api('/api/options', { method: 'POST', body: { name: $('oName').value, groupName: $('oGroup').value } });
+    $('optionForm').reset();
+    loadOptions();
+    alert('เพิ่มตัวเลือกสำเร็จ!');
+  } catch(err) { alert(err.message); }
+}
+
+async function delOption(id) {
+  if (!confirm('ต้องการลบตัวเลือกนี้ใช่หรือไม่?')) return;
+  try { await api('/api/options/' + id, { method: 'DELETE' }); loadOptions(); loadMenu(); } catch(e) { alert(e.message); }
+}
+
+function renderMenuOptionsCheckboxes() {
+  const el = $('mOptionsList');
+  if (!el) return;
+  if (!optionsData.length) {
+    el.innerHTML = '<p class="muted" style="margin:4px 0; font-size:0.9rem;">ยังไม่มีตัวเลือกฟรีในระบบ (เพิ่มได้ที่แท็บ "จัดการตัวเลือกฟรี")</p>';
+    return;
+  }
+  const byGroup = {};
+  optionsData.forEach(o => { const g = o.groupName || 'ตัวเลือกทั่วไป'; (byGroup[g] = byGroup[g] || []).push(o); });
+  let html = '';
+  Object.keys(byGroup).forEach(group => {
+    const groupItems = byGroup[group];
+    const allChecked = groupItems.every(o => selectedMenuOptions.includes(o.id));
+    html += '<div style="margin:6px 0; border-bottom:1px dashed #cbd5e1; padding-bottom:4px;">' +
+      '<label style="display:flex; align-items:center; gap:8px; font-weight:bold; color:#4f46e5; cursor:pointer; background:#e0e7ff; padding:4px 8px; border-radius:4px;">' +
+      '<input type="checkbox" ' + (allChecked && groupItems.length > 0 ? 'checked' : '') + ' onchange="toggleMenuOptionGroup(\\'' + esc(group).replace(/'/g, "\\\\'") + '\\', this.checked)"> ' +
+      '📌 ' + esc(group) + ' (เลือกกลุ่มนี้ทั้งหมด)</label>';
+    html += '<div style="padding-left:16px; margin-top:4px;">';
+    html += groupItems.map(o =>
+      '<label style="display:flex; align-items:center; gap:8px; padding:3px 0; font-weight:normal; color:#212529;"><input type="checkbox" value="' + o.id + '" ' +
+      (selectedMenuOptions.includes(o.id) ? 'checked' : '') + ' onchange="toggleMenuOption(' + o.id + ', this.checked)"> ' +
+      esc(o.name) + '</label>'
+    ).join('');
+    html += '</div></div>';
+  });
+  el.innerHTML = html;
+}
+
+function toggleMenuOptionGroup(group, checked) {
+  const groupOpts = optionsData.filter(o => (o.groupName || 'ตัวเลือกทั่วไป') === group);
+  groupOpts.forEach(o => {
+    if (checked) {
+      if (!selectedMenuOptions.includes(o.id)) selectedMenuOptions.push(o.id);
+    } else {
+      selectedMenuOptions = selectedMenuOptions.filter(id => id !== o.id);
+    }
+  });
+  renderMenuOptionsCheckboxes();
+}
+
+function toggleMenuOption(id, checked) {
+  if (checked) { if (!selectedMenuOptions.includes(id)) selectedMenuOptions.push(id); }
+  else { selectedMenuOptions = selectedMenuOptions.filter(x => x !== id); }
+  renderMenuOptionsCheckboxes();
+}
+
+// จัดการท็อปปิ้ง (มีราคาเพิ่ม)
 async function loadToppings() {
   try {
     toppingsData = await api('/api/toppings');
@@ -1460,6 +1706,7 @@ async function loadMenu() {
           '<td><b>' + esc(m.name) + '</b> ' + (m.recommended ? '<span style="color:red; font-size:0.8rem;">(แนะนำ)</span>' : '') +
           (m.hasPlaraOption ? '<span style="color:#7c3aed; font-size:0.8rem;"> (ปลาร้า)</span>' : '') +
           (m.hasSpiceOption ? '<span style="color:#ea580c; font-size:0.8rem;"> (เผ็ด)</span>' : '') +
+          (m.hasOptionChoice ? '<span style="color:#4f46e5; font-size:0.8rem;"> (ตัวเลือก)</span>' : '') +
           (m.hasToppingOption ? '<span style="color:#0891b2; font-size:0.8rem;"> (ท็อปปิ้ง ' + (m.toppings ? m.toppings.length : 0) + ')</span>' : '') + '</td>' +
           '<td>' + m.price + '฿</td>' +
           '<td>' + (m.available ? '<span style="color:green;">พร้อมขาย</span>' : '<span style="color:red;">หมด</span>') + '</td>' +
@@ -1472,7 +1719,9 @@ async function loadMenu() {
   if ($('menuByCategory')) $('menuByCategory').innerHTML = html || '<p class="muted">ยังไม่มีเมนูในระบบ</p>';
 
   if (!toppingsData.length) { try { toppingsData = await api('/api/toppings'); } catch(e) {} }
+  if (!optionsData.length) { try { optionsData = await api('/api/options'); } catch(e) {} }
   renderMenuToppingsCheckboxes();
+  renderMenuOptionsCheckboxes();
 }
 
 function toggleMenuCatGroup(cat) { menuCatCollapsed[cat] = !menuCatCollapsed[cat]; loadMenu(); }
@@ -1492,6 +1741,12 @@ function addNewCategoryPrompt() {
   select.value = trimmedCat;
 }
 
+document.addEventListener('change', function(e) {
+  if (e.target && e.target.id === 'mOptionSwitch') {
+    $('mOptionsContainerBox').hidden = !e.target.checked;
+  }
+});
+
 function editMenu(id) {
   const m = menuData.find(x => x.id === id);
   $('mId').value = m.id; $('mName').value = m.name; $('mPrice').value = m.price;
@@ -1508,19 +1763,43 @@ function editMenu(id) {
   $('mAvail').checked = m.available; $('mRec').checked = !!m.recommended;
   $('mPlara').checked = !!m.hasPlaraOption;
   $('mSpice').checked = !!m.hasSpiceOption;
+  $('mOptionSwitch').checked = !!m.hasOptionChoice;
+  $('mOptionsContainerBox').hidden = !m.hasOptionChoice;
   $('mToppingSwitch').checked = !!m.hasToppingOption;
+  
   selectedMenuToppings = (m.toppings || []).slice();
+  selectedMenuOptions = (m.options || []).slice();
+  
   renderMenuToppingsCheckboxes();
+  renderMenuOptionsCheckboxes();
   window.scrollTo({ top: 300, behavior: 'smooth' });
 }
-function resetMenuForm() { $('menuForm').reset(); $('mId').value = ''; selectedMenuToppings = []; renderMenuToppingsCheckboxes(); }
+function resetMenuForm() { 
+  $('menuForm').reset(); 
+  $('mId').value = ''; 
+  selectedMenuToppings = []; 
+  selectedMenuOptions = []; 
+  $('mOptionsContainerBox').hidden = true;
+  renderMenuToppingsCheckboxes(); 
+  renderMenuOptionsCheckboxes();
+}
 
 async function submitMenuForm(e) {
   e.preventDefault();
-  const body = { name: $('mName').value, price: Number($('mPrice').value), category: $('mCat').value,
-                 image: $('mImg').value, available: $('mAvail').checked, recommended: $('mRec').checked,
-                 hasPlaraOption: $('mPlara').checked, hasSpiceOption: $('mSpice').checked,
-                 hasToppingOption: $('mToppingSwitch').checked, toppings: selectedMenuToppings };
+  const body = { 
+    name: $('mName').value, 
+    price: Number($('mPrice').value), 
+    category: $('mCat').value,
+    image: $('mImg').value, 
+    available: $('mAvail').checked, 
+    recommended: $('mRec').checked,
+    hasPlaraOption: $('mPlara').checked, 
+    hasSpiceOption: $('mSpice').checked,
+    hasOptionChoice: $('mOptionSwitch').checked,
+    hasToppingOption: $('mToppingSwitch').checked, 
+    toppings: selectedMenuToppings,
+    options: selectedMenuOptions 
+  };
   try {
     if ($('mId').value) await api('/api/menu/' + $('mId').value, { method: 'PUT', body: body });
     else await api('/api/menu', { method: 'POST', body: body });
