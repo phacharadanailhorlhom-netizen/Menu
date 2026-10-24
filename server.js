@@ -1,4 +1,4 @@
-// ===== ระบบสั่งอาหารร้านค้า: Options with Price (ตัวเลือกมีราคา) + Topping + Optimized =====
+// ===== ระบบสั่งอาหารร้านค้า: Clean Zero Price Display + Option Pricing + Optimized =====
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -29,7 +29,7 @@ let db = {
   orders: [],
   tables: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
   toppings: [],
-  options: [], // ตัวเลือกมีราคา เช่น ขวดเล็ก +10, ขวดใหญ่ +25 { id, name, price, groupName }
+  options: [], 
   settings: { 
     theme: '#e85d04', 
     shopName: 'เลยมาตำ', 
@@ -354,7 +354,6 @@ const server = http.createServer(async (req, res) => {
             }
           });
 
-          // คำนวณราคารวมต่อหน่วย (ราคาหลักเมนู + ราคาตัวเลือก + ราคาเพิ่มท็อปปิ้ง)
           const optionsSum = optionLines.reduce((a, o) => a + o.price, 0);
           const toppingsSum = toppingLines.reduce((a, t) => a + t.price, 0);
           const unitPrice = mm.price + optionsSum + toppingsSum;
@@ -441,7 +440,7 @@ const server = http.createServer(async (req, res) => {
 
 initStorage().then(() => {
   server.listen(PORT, '0.0.0.0', () => {
-    console.log('===== เซิร์ฟเวอร์ทำงานแล้ว (Options With Price) =====');
+    console.log('===== เซิร์ฟเวอร์ทำงานแล้ว (Clean Zero Price) =====');
   });
 });
 
@@ -676,12 +675,13 @@ function renderMenu(list) {
 }
 
 function cardHtml(m) {
+  const priceDisplay = m.price > 0 ? (m.price + ' บาท') : 'เลือกราคาตามตัวเลือก';
   return '<div class="card">' +
     (m.image ? '<img src="' + esc(m.image) + '" alt="" onerror="this.style.display=\\'none\\'"> ' : '<div style="height:120px;background:#f1f5f9;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:0.9rem;">ไม่มีรูปภาพ</div>') +
     (m.recommended ? '<span class="tag-rec">แนะนำ</span>' : '') +
     (m.hasPlaraOption ? '<span class="tag-plara">ปลาร้าเลือกได้</span>' : '') +
     (m.hasSpiceOption ? '<span class="tag-spice">เผ็ดเลือกได้</span>' : '') +
-    '<h3>' + esc(m.name) + '</h3><p style="color:var(--primary); font-weight:bold; margin:4px 0;">' + m.price + ' บาท</p>' +
+    '<h3>' + esc(m.name) + '</h3><p style="color:var(--primary); font-weight:bold; margin:4px 0;">' + priceDisplay + '</p>' +
     '<button class="primary" style="margin-top:6px; padding:8px;" onclick="add(' + m.id + ')">+ เพิ่มใส่ตะกร้า</button></div>';
 }
 
@@ -716,8 +716,7 @@ function add(id) {
         optHtml += '<p class="muted" style="margin:10px 0 4px; text-align:left;">📌 ' + esc(group) + ' (บังคับเลือก)</p>';
         optHtml += '<div class="choiceGroup" data-group="' + esc(group) + '">';
         byGroup[group].forEach(o => {
-          const priceText = o.price > 0 ? ' (+' + o.price + '฿)' : '';
-          optHtml += '<button type="button" data-id="' + o.id + '" onclick="chooseOption(\\'' + esc(group).replace(/'/g, "\\\\'") + '\\', ' + o.id + ')">' + esc(o.name) + priceText + '</button>';
+          optHtml += '<button type="button" data-id="' + o.id + '" onclick="chooseOption(\\'' + esc(group).replace(/'/g, "\\\\'") + '\\', ' + o.id + ')">' + esc(o.name) + ' (' + o.price + '฿)</button>';
         });
         optHtml += '</div>';
       });
@@ -837,12 +836,15 @@ function renderCart() {
     if (cart[id].plara) tagLine += '🐟 ' + esc(cart[id].plara) + 'ปลาร้า';
     if (cart[id].spice) tagLine += (tagLine ? ' · ' : '') + '🔥 ' + esc(cart[id].spice);
 
+    // ซ่อนราคา (0฿) ถ้าเมนูหลักราคาเป็น 0 เพื่อความสะอาดตา
+    const priceTag = m.price > 0 ? ' (' + itemUnitPrice + '฿)' : ' (' + itemUnitPrice + '฿)';
+
     out += '<div style="border-bottom:1px solid #edf2f7; padding:8px 0;">' +
-      '<div class="row"><span><b>' + esc(m.name) + '</b> (' + itemUnitPrice + '฿)</span><span>' +
+      '<div class="row"><span><b>' + esc(m.name) + '</b>' + priceTag + '</span><span>' +
       '<button onclick="changeQty(' + id + ',-1)">−</button> ' + cart[id].qty + ' ' +
       '<button onclick="changeQty(' + id + ',1)">+</button></span></div>' +
       (tagLine ? '<div style="font-size:0.8rem; color:#7c3aed;">' + tagLine + '</div>' : '') +
-      (optionItems.length ? '<div style="margin:2px 0; font-size:0.85rem; color:#4f46e5;">📌 ' + optionItems.map(o => esc(o.name) + (o.price > 0 ? ' (+' + o.price + '฿)' : '')).join(', ') + '</div>' : '') +
+      (optionItems.length ? '<div style="margin:2px 0; font-size:0.85rem; color:#4f46e5;">📌 ' + optionItems.map(o => esc(o.name) + ' (' + o.price + '฿)').join(', ') + '</div>' : '') +
       (toppingItems.length ? '<div style="margin:4px 0;">+เพิ่ม: ' + toppingItems.map(t => '<span class="tag-topping">' + esc(t.name) + '</span>').join(' ') + '</div>' : '') +
       '<input placeholder="หมายเหตุเฉพาะเมนูนี้ เช่น ไม่ใส่ผัก" value="' + esc(cart[id].note) + '" oninput="changeNote(' + id + ', this.value)" style="margin:4px 0 0; padding:6px; font-size:0.85rem;">' +
       '</div>';
@@ -893,7 +895,7 @@ async function loadTableOrders() {
         
         let detailHtml = '';
         if (tagLine) detailHtml += '<div style="color:#7c3aed; font-size:0.9rem;">- ' + tagLine + '</div>';
-        if (i.options && i.options.length) detailHtml += '<div style="color:#4f46e5; font-size:0.9rem;">- ตัวเลือก: ' + i.options.map(o => esc(o.name) + (o.price > 0 ? ' (+' + o.price + '฿)' : '')).join(', ') + '</div>';
+        if (i.options && i.options.length) detailHtml += '<div style="color:#4f46e5; font-size:0.9rem;">- ตัวเลือก: ' + i.options.map(o => esc(o.name) + ' (' + o.price + '฿)').join(', ') + '</div>';
         
         if (i.toppings && i.toppings.length) {
           detailHtml += '<div style="background:#e0f2fe; border-left:3px solid #0284c7; padding:3px 6px; margin:3px 0; border-radius:4px; color:#0369a1; font-size:0.9rem; font-weight:bold;">' +
@@ -902,7 +904,7 @@ async function loadTableOrders() {
 
         if (i.note) detailHtml += '<div class="muted" style="font-size:0.85rem;">- หมายเหตุ: ' + esc(i.note) + '</div>';
 
-        s += '<li style="margin-bottom:8px;"><b>' + esc(i.name) + '</b> × ' + i.qty + detailHtml + '</li>';
+        s += '<li style="margin-bottom:8px;"><b>' + esc(i.name) + '</b> (' + i.price + '฿) × ' + i.qty + detailHtml + '</li>';
       });
       s += '</ul></div>';
       return s;
@@ -986,7 +988,7 @@ const ADMIN_BODY = `
       <h3>รายละเอียดและรูปภาพเมนู (แก้ไขแบบละเอียด)</h3>
       <input type="hidden" id="mId">
       <input id="mName" placeholder="ชื่อเมนูอาหาร" required>
-      <input id="mPrice" type="number" min="0" placeholder="ราคา (บาท)" required>
+      <input id="mPrice" type="number" min="0" placeholder="ราคาตั้งต้น (บาท) เช่น 0 หรือ 10" required>
       
       <label style="display:block; margin-top:8px;">หมวดหมู่อาหาร:</label>
       <div style="display:flex; gap:8px; align-items:center;">
@@ -1030,9 +1032,9 @@ const ADMIN_BODY = `
 
   <section id="optionsTab" class="tab" hidden>
     <form id="optionForm" class="panel narrow" style="max-width:500px; margin-bottom:20px;" onsubmit="submitOptionForm(event)">
-      <h3>📌 เพิ่มตัวเลือก (เช่น ขวดเล็ก 10฿, ขวดใหญ่ 25฿)</h3>
+      <h3>📌 เพิ่มตัวเลือก (เช่น ขวดเล็ก 10฿, ขวดใหญ่ 20฿)</h3>
       <input id="oName" placeholder="ชื่อตัวเลือก เช่น ขวดเล็ก, ขวดใหญ่" required>
-      <input id="oPrice" type="number" min="0" placeholder="ราคาเพิ่ม (บาท) เช่น 10, 25" required>
+      <input id="oPrice" type="number" min="0" placeholder="ราคา (บาท) เช่น 10, 20" required>
       <label style="display:block; margin-top:8px;">ชื่อกลุ่มตัวเลือก (เช่น ขนาดน้ำเปล่า):</label>
       <div style="display:flex; gap:8px; align-items:center;">
         <select id="oGroup" style="margin:6px 0; flex:1;">
@@ -1413,7 +1415,7 @@ function renderOrdersView() {
         
         let detailHtml = '';
         if (tagLine) detailHtml += '<div style="color:#7c3aed; font-size:0.9rem;">- ' + tagLine + '</div>';
-        if (i.options && i.options.length) detailHtml += '<div style="color:#4f46e5; font-size:0.9rem;">- ตัวเลือก: ' + i.options.map(o => esc(o.name) + (o.price > 0 ? ' (+' + o.price + '฿)' : '')).join(', ') + '</div>';
+        if (i.options && i.options.length) detailHtml += '<div style="color:#4f46e5; font-size:0.9rem;">- ตัวเลือก: ' + i.options.map(o => esc(o.name) + ' (' + o.price + '฿)').join(', ') + '</div>';
         
         if (i.toppings && i.toppings.length) {
           detailHtml += '<div style="background:#e0f2fe; border-left:3px solid #0284c7; padding:3px 6px; margin:3px 0; border-radius:4px; color:#0369a1; font-size:0.9rem; font-weight:bold;">' +
@@ -1422,7 +1424,7 @@ function renderOrdersView() {
 
         if (i.note) detailHtml += '<div class="muted" style="font-size:0.85rem;">- หมายเหตุ: ' + esc(i.note) + '</div>';
 
-        s += '<li style="margin-bottom:8px;"><b>' + esc(i.name) + '</b> × ' + i.qty + detailHtml + '</li>';
+        s += '<li style="margin-bottom:8px;"><b>' + esc(i.name) + '</b> (' + i.price + '฿) × ' + i.qty + detailHtml + '</li>';
       });
       s += '</ul><p style="margin:8px 0;"><b>รวมราคาทั้งสิ้น: ' + o.total + ' บาท</b></p><div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:8px;">';
       Object.keys(STATUS).forEach(k => {
@@ -1506,7 +1508,7 @@ async function clearAllOrders() {
 
 setInterval(loadOrders, 8000);
 
-// จัดการตัวเลือก (มียอดราคาเพิ่มได้)
+// จัดการตัวเลือก
 async function loadOptions() {
   try {
     optionsData = await api('/api/options');
@@ -1521,9 +1523,9 @@ async function loadOptions() {
     let html = '';
     Object.keys(byGroup).forEach(group => {
       html += '<div class="panel" style="margin-bottom:10px;"><h4 style="margin:0 0 8px;">📌 ' + esc(group) + '</h4><div style="overflow-x:auto;"><table>' +
-        '<tr><th>ชื่อตัวเลือก</th><th>ราคาเพิ่ม</th><th>จัดการ</th></tr>';
+        '<tr><th>ชื่อตัวเลือก</th><th>ราคา</th><th>จัดการ</th></tr>';
       byGroup[group].forEach(o => {
-        html += '<tr><td><b>' + esc(o.name) + '</b></td><td>+' + o.price + '฿</td><td><button type="button" onclick="delOption(' + o.id + ')" style="color:red;">ลบ</button></td></tr>';
+        html += '<tr><td><b>' + esc(o.name) + '</b></td><td>' + o.price + '฿</td><td><button type="button" onclick="delOption(' + o.id + ')" style="color:red;">ลบ</button></td></tr>';
       });
       html += '</table></div></div>';
     });
@@ -1584,7 +1586,7 @@ function renderMenuOptionsCheckboxes() {
     html += groupItems.map(o =>
       '<label style="display:flex; align-items:center; gap:8px; padding:3px 0; font-weight:normal; color:#212529;"><input type="checkbox" value="' + o.id + '" ' +
       (selectedMenuOptions.includes(o.id) ? 'checked' : '') + ' onchange="toggleMenuOption(' + o.id + ', this.checked)"> ' +
-      esc(o.name) + ' (+' + o.price + ' บาท)</label>'
+      esc(o.name) + ' (' + o.price + ' บาท)</label>'
     ).join('');
     html += '</div></div>';
   });
@@ -1734,6 +1736,7 @@ async function loadMenu() {
       html += '<div style="overflow-x:auto; margin-top:10px;"><table>' +
         '<tr><th>รูป</th><th>ชื่อเมนู</th><th>ราคา</th><th>สถานะ</th><th>จัดการ</th></tr>';
       items.forEach(m => {
+        const priceView = m.price > 0 ? (m.price + '฿') : 'ตามตัวเลือก';
         html += '<tr>' +
           '<td>' + (m.image ? '<img src="' + esc(m.image) + '" style="width:40px;height:40px;object-fit:cover;border-radius:4px;" onerror="this.style.display=\\'none\\'">' : '-') + '</td>' +
           '<td><b>' + esc(m.name) + '</b> ' + (m.recommended ? '<span style="color:red; font-size:0.8rem;">(แนะนำ)</span>' : '') +
@@ -1741,7 +1744,7 @@ async function loadMenu() {
           (m.hasSpiceOption ? '<span style="color:#ea580c; font-size:0.8rem;"> (เผ็ด)</span>' : '') +
           (m.hasOptionChoice ? '<span style="color:#4f46e5; font-size:0.8rem;"> (ตัวเลือก)</span>' : '') +
           (m.hasToppingOption ? '<span style="color:#0891b2; font-size:0.8rem;"> (ท็อปปิ้ง ' + (m.toppings ? m.toppings.length : 0) + ')</span>' : '') + '</td>' +
-          '<td>' + m.price + '฿</td>' +
+          '<td>' + priceView + '</td>' +
           '<td>' + (m.available ? '<span style="color:green;">พร้อมขาย</span>' : '<span style="color:red;">หมด</span>') + '</td>' +
           '<td><button type="button" onclick="editMenu(' + m.id + ')">แก้ไข</button> <button type="button" onclick="delMenu(' + m.id + ')" style="color:red;">ลบ</button></td></tr>';
       });
