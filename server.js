@@ -1835,18 +1835,29 @@ async function loadMenu() {
   let html = '';
   Object.keys(byCat).sort((a,b) => a.localeCompare(b,'th')).forEach(cat => {
     const items = byCat[cat];
-    const collapsed = !!menuCatCollapsed[cat];
+
+    // 1. ตั้งค่าให้ย่อหมวดหมู่เป็นค่าเริ่มต้น (ถ้ายังไม่ได้กดเปิด จะกำหนดเป็น true หรือย่อไว้ก่อน)
+    const collapsed = menuCatCollapsed[cat] === undefined ? true : menuCatCollapsed[cat];
+
     html += '<div class="panel" style="margin-bottom:14px;">' +
-      '<div class="catGroupHeader" onclick="toggleMenuCatGroup(\\'' + esc(cat).replace(/'/g, "\\\\'") + '\\')">' +
+      '<div class="catGroupHeader" onclick="toggleMenuCatGroup(\'' + esc(cat).replace(/'/g, "\\\\'") + '\')">' +
       '<h3 style="margin:0;">📂 ' + esc(cat) + ' <span class="muted" style="font-size:0.8rem;">(' + items.length + ' รายการ)</span></h3>' +
       '<span>' + (collapsed ? '▼ แสดง' : '▲ ซ่อน') + '</span></div>';
+
     if (!collapsed) {
       html += '<div style="overflow-x:auto; margin-top:10px;"><table>' +
-        '<tr><th>รูป</th><th>ชื่อเมนู</th><th>ราคา</th><th>สถานะ</th><th>จัดการ</th></tr>';
+        '<tr><th>รูปภาพ</th><th>ชื่อเมนู</th><th>ราคา</th><th>สถานะ</th><th>จัดการ</th></tr>';
       items.forEach(m => {
         const priceView = m.price > 0 ? (m.price + '฿') : 'ตามตัวเลือก';
+
+        // 2. แสดงสถานะรูปภาพ (มีรูป/ไม่มีรูป) พร้อมรูปตัวอย่าง
+        const hasImage = m.image && m.image.trim() !== '';
+        const imgView = hasImage
+          ? '<div style="display:flex; align-items:center; gap:4px;"><img src="' + esc(m.image) + '" style="width:36px;height:36px;object-fit:cover;border-radius:4px;" onerror="this.style.display=\'none\'"><span style="color:#10b981; font-size:0.75rem; font-weight:bold; white-space:nowrap;">🖼️ มีรูป</span></div>'
+          : '<span style="color:#ef4444; font-size:0.75rem; font-weight:bold; white-space:nowrap;">❌ ไม่มีรูป</span>';
+
         html += '<tr>' +
-          '<td>' + (m.image ? '<img src="' + esc(m.image) + '" style="width:40px;height:40px;object-fit:cover;border-radius:4px;" onerror="this.style.display=\\'none\\'">' : '-') + '</td>' +
+          '<td>' + imgView + '</td>' +
           '<td><b>' + esc(m.name) + '</b> ' + (m.recommended ? '<span style="color:red; font-size:0.8rem;">(แนะนำ)</span>' : '') +
           (m.hasPlaraOption ? '<span style="color:#7c3aed; font-size:0.8rem;"> (ปลาร้า)</span>' : '') +
           (m.hasSpiceOption ? '<span style="color:#ea580c; font-size:0.8rem;"> (เผ็ด)</span>' : '') +
@@ -1867,6 +1878,7 @@ async function loadMenu() {
   renderMenuToppingsCheckboxes();
   renderMenuOptionsCheckboxes();
 }
+
 
 function toggleMenuCatGroup(cat) { menuCatCollapsed[cat] = !menuCatCollapsed[cat]; loadMenu(); }
 
