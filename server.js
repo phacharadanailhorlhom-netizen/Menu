@@ -1,4 +1,4 @@
-// ===== ระบบสั่งอาหารร้านค้า: Single Bin + Compression + Safe Auth + Collapsed Categories =====
+// ===== ระบบสั่งอาหารร้านค้า: Single Bin + Persistent Sessions (Render Fix) + Client Compression + Collapsed Categories =====
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -26,6 +26,7 @@ function checkPw(pw, stored) {
 
 let db = {
   users: [{ username: 'admin', password: hashPw('admin123'), role: 'admin' }],
+  sessions: {}, // เก็บ Session ลง DB ป้องกันล็อกอินหลุดเมื่อ Render Sleep
   menu: [],
   orders: [],
   tables: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
@@ -71,7 +72,7 @@ async function initStorage() {
     } catch(e) {}
   }
 
-  // ป้องกันปัญหาระบบล็อกอินแอดมินเข้าไม่ได้
+  // บังคับสิทธิ์แอดมินให้อยู่ในระบบเสมอ (Self-healing Admin)
   if (!db.users || !Array.isArray(db.users) || db.users.length === 0) {
     db.users = [{ username: 'admin', password: hashPw('admin123'), role: 'admin' }];
   } else {
@@ -83,6 +84,7 @@ async function initStorage() {
     }
   }
 
+  if (!db.sessions || typeof db.sessions !== 'object') db.sessions = {};
   if (!db.menu || !Array.isArray(db.menu)) db.menu = [];
   if (!db.orders || !Array.isArray(db.orders)) db.orders = [];
   if (!db.tables || !Array.isArray(db.tables)) db.tables = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
@@ -135,7 +137,6 @@ function save() {
   }
 }
 
-const sessions = new Map();
 const STATUSES = ['pending', 'cooking', 'served', 'cancelled'];
 
 function send(res, code, data) {
@@ -202,8 +203,11 @@ const server = http.createServer(async (req, res) => {
 
     const body = ['POST', 'PUT', 'PATCH'].includes(method) ? await readBody(req) : {};
     const token = (req.headers.authorization || '').replace('Bearer ', '');
-    const sess = sessions.get(token);
+    
+    // ดึง Session จาก db ถาวร
+    const sess = db.sessions ? db.sessions[token] : null;
     const user = sess && sess.expires > Date.now() ? sess : null;
+
     const need = (...roles) => {
       if (!user) { send(res, 401, { error: 'กรุณาเข้าสู่ระบบ' }); return false; }
       if (!roles.includes(user.role)) { send(res, 403, { error: 'คุณไม่มีสิทธิ์ทำรายการนี้' }); return false; }
@@ -288,11 +292,19 @@ const server = http.createServer(async (req, res) => {
       const u = db.users.find(x => x.username === body.username);
       if (!u || !checkPw(body.password || '', u.password))
         return send(res, 401, { error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
+      
       const t = crypto.randomBytes(32).toString('hex');
-      sessions.set(t, { username: u.username, role: u.role, expires: Date.now() + 12 * 3600e3 });
+      if (!db.sessions) db.sessions = {};
+      db.sessions[t] = { username: u.username, role: u.role, expires: Date.now() + 12 * 3600e3 };
+      save();
+
       return send(res, 200, { token: t });
     }
-    if (part === 'logout' && method === 'POST') { sessions.delete(token); return send(res, 200, { ok: true }); }
+    if (part === 'logout' && method === 'POST') {
+      if (db.sessions && token) delete db.sessions[token];
+      save();
+      return send(res, 200, { ok: true });
+    }
     if (part === 'me' && method === 'GET') {
       if (!need('admin', 'staff')) return;
       return send(res, 200, { username: user.username, role: user.role });
@@ -439,8 +451,13 @@ const server = http.createServer(async (req, res) => {
       if (method === 'DELETE' && id) {
         const name = decodeURIComponent(id);
         if (name === user.username) return send(res, 400, { error: 'ลบบัญชีตัวเองไม่ได้' });
-        db.users = db.users.filter(u => u.username !== name); save();
-        for (const [t, s] of sessions) if (s.username === name) sessions.delete(t);
+        db.users = db.users.filter(u => u.username !== name);
+        if (db.sessions) {
+          for (const [t, s] of Object.entries(db.sessions)) {
+            if (s.username === name) delete db.sessions[t];
+          }
+        }
+        save();
         return send(res, 200, { ok: true });
       }
     }
