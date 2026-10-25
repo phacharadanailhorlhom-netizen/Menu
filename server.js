@@ -1,4 +1,4 @@
-// ===== ระบบสั่งอาหารร้านค้า: Clean Zero Price Display + Option Pricing + Optimized =====
+// ===== ระบบสั่งอาหารร้านค้า: Single Bin + Compression + Safe Auth + Collapsed Categories =====
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -17,6 +17,7 @@ function hashPw(pw, salt) {
   return salt + ':' + crypto.scryptSync(String(pw), salt, 64).toString('hex');
 }
 function checkPw(pw, stored) {
+  if (!stored || typeof stored !== 'string' || !stored.includes(':')) return false;
   const [salt, hash] = stored.split(':');
   const a = crypto.scryptSync(String(pw), salt, 64);
   const b = Buffer.from(hash, 'hex');
@@ -70,7 +71,18 @@ async function initStorage() {
     } catch(e) {}
   }
 
-  if (!db.users || !Array.isArray(db.users)) db.users = [{ username: 'admin', password: hashPw('admin123'), role: 'admin' }];
+  // ป้องกันปัญหาระบบล็อกอินแอดมินเข้าไม่ได้
+  if (!db.users || !Array.isArray(db.users) || db.users.length === 0) {
+    db.users = [{ username: 'admin', password: hashPw('admin123'), role: 'admin' }];
+  } else {
+    const adminUser = db.users.find(u => u.username === 'admin');
+    if (adminUser) {
+      adminUser.password = hashPw('admin123');
+    } else {
+      db.users.push({ username: 'admin', password: hashPw('admin123'), role: 'admin' });
+    }
+  }
+
   if (!db.menu || !Array.isArray(db.menu)) db.menu = [];
   if (!db.orders || !Array.isArray(db.orders)) db.orders = [];
   if (!db.tables || !Array.isArray(db.tables)) db.tables = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
@@ -102,13 +114,15 @@ async function initStorage() {
   save();
 }
 
+let saveTimer = null;
 function save() {
   try {
     fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
   } catch(e) {}
   
   if (JSONBIN_ID && JSONBIN_KEY) {
-    setTimeout(() => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
       fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_ID}`, {
         method: 'PUT',
         headers: {
@@ -117,7 +131,7 @@ function save() {
         },
         body: JSON.stringify(db)
       }).catch(e => {});
-    }, 10);
+    }, 1000);
   }
 }
 
@@ -440,7 +454,7 @@ const server = http.createServer(async (req, res) => {
 
 initStorage().then(() => {
   server.listen(PORT, '0.0.0.0', () => {
-    console.log('===== เซิร์ฟเวอร์ทำงานแล้ว (Clean Zero Price) =====');
+    console.log('===== เซิร์ฟเวอร์ทำงานแล้ว =====');
   });
 });
 
@@ -836,8 +850,7 @@ function renderCart() {
     if (cart[id].plara) tagLine += '🐟 ' + esc(cart[id].plara) + 'ปลาร้า';
     if (cart[id].spice) tagLine += (tagLine ? ' · ' : '') + '🔥 ' + esc(cart[id].spice);
 
-    // ซ่อนราคา (0฿) ถ้าเมนูหลักราคาเป็น 0 เพื่อความสะอาดตา
-    const priceTag = m.price > 0 ? ' (' + itemUnitPrice + '฿)' : ' (' + itemUnitPrice + '฿)';
+    const priceTag = ' (' + itemUnitPrice + '฿)';
 
     out += '<div style="border-bottom:1px solid #edf2f7; padding:8px 0;">' +
       '<div class="row"><span><b>' + esc(m.name) + '</b>' + priceTag + '</span><span>' +
@@ -985,7 +998,7 @@ const ADMIN_BODY = `
 
   <section id="menuTab" class="tab" hidden>
     <form id="menuForm" class="panel" style="margin-bottom:20px;" onsubmit="submitMenuForm(event)">
-      <h3>รายละเอียดและรูปภาพเมนู (แก้ไขแบบละเอียด)</h3>
+      <h3>รายละเอียดและรูปภาพเมนู (แก้ไขแบบรายละเอียด)</h3>
       <input type="hidden" id="mId">
       <input id="mName" placeholder="ชื่อเมนูอาหาร" required>
       <input id="mPrice" type="number" min="0" placeholder="ราคาตั้งต้น (บาท) เช่น 0 หรือ 10" required>
@@ -998,7 +1011,7 @@ const ADMIN_BODY = `
         <button type="button" onclick="addNewCategoryPrompt()" style="white-space:nowrap; padding:10px;">➕ เพิ่มหมวดใหม่</button>
       </div>
 
-      <label style="display:block; margin-top:8px;">อัปโหลดรูปภาพจากในเครื่อง หรือวางลิงก์:</label>
+      <label style="display:block; margin-top:8px;">อัปโหลดรูปภาพจากในเครื่อง (บีบอัดอัตโนมัติ) หรือวางลิงก์:</label>
       <div style="display:flex; gap:8px; align-items:center;">
         <input type="file" id="mFile" accept="image/*" style="padding:6px;" onchange="handleFile(event)">
         <input id="mImg" placeholder="หรือวาง URL รูปภาพ" style="margin:0;">
@@ -1072,7 +1085,7 @@ const ADMIN_BODY = `
       <label>ชื่อร้านอาหาร:</label>
       <input id="setName" placeholder="ชื่อร้าน">
       
-      <label style="margin-top:10px; display:block;">โลโก้ร้าน (อัปโหลดจากเครื่อง หรือวางลิงก์):</label>
+      <label style="margin-top:10px; display:block;">โลโก้ร้าน (บีบอัดอัตโนมัติ):</label>
       <div style="display:flex; gap:8px; align-items:center;">
         <input type="file" id="logoFile" accept="image/*" style="padding:6px;" onchange="handleLogoFile(event)">
         <input id="setLogo" placeholder="หรือวาง URL โลโก้" style="margin:0;">
@@ -1110,7 +1123,7 @@ const ADMIN_BODY = `
         <option value="custom">🎵 เสียงอัปโหลดของคุณเอง (Custom Audio)</option>
       </select>
 
-      <label style="margin-top:10px; display:block;">อัปโหลดไฟล์เสียงแจ้งเตือนของคุณเอง (MP3/WAV):</label>
+      <label style="margin-top:10px; display:block;">อัปโหลดไฟล์เสียงแจ้งเตือนของคุณเอง (ตัดที่ 30 วินาที + บีบอัดอัตโนมัติ):</label>
       <input type="file" id="audioFile" accept="audio/*" style="padding:6px;" onchange="handleAudioFile(event)">
       <input id="setCustomAudio" placeholder="หรือลิงก์ไฟล์เสียง / Base64" style="font-size:0.85rem; margin-top:4px;">
 
@@ -1168,90 +1181,62 @@ window.currentSoundVol = 1.0;
 window.currentLoopInterval = 5000;
 window.currentActiveAudio = null;
 
+// 1. ระบบบีบอัดภาพเมนูอัตโนมัติ (Canvas Compression)
 function handleFile(e) {
   const file = e.target.files[0];
   if (!file) return;
-
   const reader = new FileReader();
   reader.onload = function(evt) {
     const img = new Image();
     img.onload = function() {
-      // ตั้งค่าขนาดสูงสุดที่ต้องการ (เช่น 800px กำลังพอดีกับหน้าเว็บ)
-      const MAX_WIDTH = 800;
-      const MAX_HEIGHT = 800;
-      let width = img.width;
-      let height = img.height;
-
-      // คำนวณสัดส่วนรูปภาพ
+      const MAX_WIDTH = 800, MAX_HEIGHT = 800;
+      let width = img.width, height = img.height;
       if (width > height) {
-        if (width > MAX_WIDTH) {
-          height = Math.round(height * (MAX_WIDTH / width));
-          width = MAX_WIDTH;
-        }
+        if (width > MAX_WIDTH) { height = Math.round(height * (MAX_WIDTH / width)); width = MAX_WIDTH; }
       } else {
-        if (height > MAX_HEIGHT) {
-          width = Math.round(width * (MAX_HEIGHT / height));
-          height = MAX_HEIGHT;
-        }
+        if (height > MAX_HEIGHT) { width = Math.round(width * (MAX_HEIGHT / height)); height = MAX_HEIGHT; }
       }
-
-      // วาดรูปลงบน Canvas เพื่อย่อขนาด
       const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
+      canvas.width = width; canvas.height = height;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, width, height);
-
-      // บีบอัดเป็น JPEG คุณภาพ 0.7 (ลดขนาดไฟล์ลงได้มากกว่า 80-90%)
-      const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
-      $('mImg').value = compressedBase64;
+      $('mImg').value = canvas.toDataURL('image/jpeg', 0.7);
     };
     img.src = evt.target.result;
   };
   reader.readAsDataURL(file);
 }
 
+// 2. ระบบบีบอัดโลโก้ร้านอัตโนมัติ
 function handleLogoFile(e) {
   const file = e.target.files[0];
   if (!file) return;
-
   const reader = new FileReader();
   reader.onload = function(evt) {
     const img = new Image();
     img.onload = function() {
-      // โลโก้ใช้ขนาดเล็ก เช่น 300x300 ก็เพียงพอ
       const MAX_SIZE = 300;
-      let width = img.width;
-      let height = img.height;
-
+      let width = img.width, height = img.height;
       if (width > height) {
-        if (width > MAX_SIZE) {
-          height = Math.round(height * (MAX_SIZE / width));
-          width = MAX_SIZE;
-        }
+        if (width > MAX_SIZE) { height = Math.round(height * (MAX_SIZE / width)); width = MAX_SIZE; }
       } else {
-        if (height > MAX_SIZE) {
-          width = Math.round(width * (MAX_SIZE / height));
-          height = MAX_SIZE;
-        }
+        if (height > MAX_SIZE) { width = Math.round(width * (MAX_SIZE / height)); height = MAX_SIZE; }
       }
-
       const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
+      canvas.width = width; canvas.height = height;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, width, height);
-
-      const compressedBase64 = canvas.toDataURL('image/jpeg', 0.8);
-      $('setLogo').value = compressedBase64;
+      const compressed = canvas.toDataURL('image/jpeg', 0.8);
+      $('setLogo').value = compressed;
       const prev = $('logoPreview');
-      if (prev) { prev.src = compressedBase64; prev.hidden = false; }
+      if (prev) { prev.src = compressed; prev.hidden = false; }
     };
     img.src = evt.target.result;
   };
   reader.readAsDataURL(file);
 }
 
+// 3. ระบบตัดเสียงไม่เกิน 30 วินาที + บีบอัดเสียง Mono 22.05kHz
 function handleAudioFile(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -1262,15 +1247,11 @@ function handleAudioFile(e) {
       const arrayBuffer = evt.target.result;
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       const audioCtx = new AudioCtx();
-      
-      // ถอดรหัสไฟล์เสียง
       const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
-      // ถ้าไม่เกิน 30 วินาทีใช้ความยาวเต็ม ถ้าเกินจะตัดเหลือ 30 วินาที
       const maxDuration = 30; 
       const duration = Math.min(audioBuffer.duration, maxDuration);
       
-      // บีบอัดเป็น Mono (1 Channel) และ 22,050Hz (ประหยัดความจุ)
       const targetSampleRate = 22050; 
       const numFrames = Math.floor(duration * targetSampleRate);
 
@@ -1281,14 +1262,11 @@ function handleAudioFile(e) {
       source.start(0);
 
       const renderedBuffer = await offlineCtx.startRendering();
-      
-      // แปลงเป็น Base64 WAV
       const wavBase64 = bufferToWavBase64(renderedBuffer);
 
       $('setCustomAudio').value = wavBase64;
       $('setSound').value = 'custom';
       
-      // แจ้งเตือนผู้ใช้ตามความยาวจริง
       if (audioBuffer.duration > maxDuration) {
         alert('ปรับแต่งเสียงเรียบร้อย! (ไฟล์ยาวเกิน 30 วินาที ระบบจึงตัดเหลือ 30 วินาทีแรกให้อัตโนมัติ)');
       } else {
@@ -1299,6 +1277,51 @@ function handleAudioFile(e) {
     }
   };
   reader.readAsArrayBuffer(file);
+}
+
+function bufferToWavBase64(buffer) {
+  const numOfChan = buffer.numberOfChannels;
+  const length = buffer.length * numOfChan * 2 + 44;
+  const out = new DataView(new ArrayBuffer(length));
+  const channels = [];
+  let sample = 0, offset = 0, pos = 0;
+
+  function setUint16(data) { out.setUint16(pos, data, true); pos += 2; }
+  function setUint32(data) { out.setUint32(pos, data, true); pos += 4; }
+
+  setUint32(0x46464952);
+  setUint32(length - 8);
+  setUint32(0x45564157);
+  setUint32(0x20746d66);
+  setUint32(16);
+  setUint16(1);
+  setUint16(numOfChan);
+  setUint32(buffer.sampleRate);
+  setUint32(buffer.sampleRate * 2 * numOfChan);
+  setUint16(numOfChan * 2);
+  setUint16(16);
+  setUint32(0x61746164);
+  setUint32(length - pos - 4);
+
+  for (let i = 0; i < buffer.numberOfChannels; i++) channels.push(buffer.getChannelData(i));
+
+  while (offset < buffer.length) {
+    for (let i = 0; i < numOfChan; i++) {
+      sample = Math.max(-1, Math.min(1, channels[i][offset]));
+      sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
+      out.setInt16(pos, sample, true);
+      pos += 2;
+    }
+    offset++;
+  }
+
+  let binary = '';
+  const bytes = new Uint8Array(out.buffer);
+  const chunk = 8192;
+  for (let i = 0; i < bytes.byteLength; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return 'data:audio/wav;base64,' + btoa(binary);
 }
 
 function getCtx() {
@@ -1616,7 +1639,6 @@ async function clearAllOrders() {
 
 setInterval(loadOrders, 8000);
 
-// จัดการตัวเลือก
 async function loadOptions() {
   try {
     optionsData = await api('/api/options');
@@ -1719,7 +1741,6 @@ function toggleMenuOption(id, checked) {
   renderMenuOptionsCheckboxes();
 }
 
-// จัดการท็อปปิ้ง (มีราคาเพิ่ม)
 async function loadToppings() {
   try {
     toppingsData = await api('/api/toppings');
@@ -1822,6 +1843,7 @@ function toggleMenuTopping(id, checked) {
   renderMenuToppingsCheckboxes();
 }
 
+// 4. แสดงสถานะรูปภาพ + ย่อหมวดหมู่เป็นค่าเริ่มต้น
 async function loadMenu() {
   menuData = await api('/api/menu');
   const cats = [...new Set(menuData.map(m => m.category))].filter(Boolean);
@@ -1835,22 +1857,16 @@ async function loadMenu() {
   let html = '';
   Object.keys(byCat).sort((a,b) => a.localeCompare(b,'th')).forEach(cat => {
     const items = byCat[cat];
-
-    // 1. ตั้งค่าให้ย่อหมวดหมู่เป็นค่าเริ่มต้น (ถ้ายังไม่ได้กดเปิด จะกำหนดเป็น true หรือย่อไว้ก่อน)
     const collapsed = menuCatCollapsed[cat] === undefined ? true : menuCatCollapsed[cat];
-
     html += '<div class="panel" style="margin-bottom:14px;">' +
       '<div class="catGroupHeader" onclick="toggleMenuCatGroup(\'' + esc(cat).replace(/'/g, "\\\\'") + '\')">' +
       '<h3 style="margin:0;">📂 ' + esc(cat) + ' <span class="muted" style="font-size:0.8rem;">(' + items.length + ' รายการ)</span></h3>' +
       '<span>' + (collapsed ? '▼ แสดง' : '▲ ซ่อน') + '</span></div>';
-
     if (!collapsed) {
       html += '<div style="overflow-x:auto; margin-top:10px;"><table>' +
         '<tr><th>รูปภาพ</th><th>ชื่อเมนู</th><th>ราคา</th><th>สถานะ</th><th>จัดการ</th></tr>';
       items.forEach(m => {
         const priceView = m.price > 0 ? (m.price + '฿') : 'ตามตัวเลือก';
-
-        // 2. แสดงสถานะรูปภาพ (มีรูป/ไม่มีรูป) พร้อมรูปตัวอย่าง
         const hasImage = m.image && m.image.trim() !== '';
         const imgView = hasImage
           ? '<div style="display:flex; align-items:center; gap:4px;"><img src="' + esc(m.image) + '" style="width:36px;height:36px;object-fit:cover;border-radius:4px;" onerror="this.style.display=\'none\'"><span style="color:#10b981; font-size:0.75rem; font-weight:bold; white-space:nowrap;">🖼️ มีรูป</span></div>'
@@ -1878,7 +1894,6 @@ async function loadMenu() {
   renderMenuToppingsCheckboxes();
   renderMenuOptionsCheckboxes();
 }
-
 
 function toggleMenuCatGroup(cat) { menuCatCollapsed[cat] = !menuCatCollapsed[cat]; loadMenu(); }
 
