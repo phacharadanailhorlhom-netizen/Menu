@@ -1876,7 +1876,7 @@ async function loadMenu() {
     const items = byCat[cat];
     const collapsed = menuCatCollapsed[cat] === undefined ? true : menuCatCollapsed[cat];
     html += '<div class="panel" style="margin-bottom:14px;">' +
-      '<div class="catGroupHeader" onclick="toggleMenuCatGroup(\'' + esc(cat).replace(/'/g, "\\\\'") + '\')">' +
+      '<div class="catGroupHeader" onclick="toggleMenuCatGroup(\\'' + esc(cat).replace(/'/g, "\\\\'") + '\\')">' +
       '<h3 style="margin:0;">📂 ' + esc(cat) + ' <span class="muted" style="font-size:0.8rem;">(' + items.length + ' รายการ)</span></h3>' +
       '<span>' + (collapsed ? '▼ แสดง' : '▲ ซ่อน') + '</span></div>';
     if (!collapsed) {
@@ -1886,7 +1886,7 @@ async function loadMenu() {
         const priceView = m.price > 0 ? (m.price + '฿') : 'ตามตัวเลือก';
         const hasImage = m.image && m.image.trim() !== '';
         const imgView = hasImage
-          ? '<div style="display:flex; align-items:center; gap:4px;"><img src="' + esc(m.image) + '" style="width:36px;height:36px;object-fit:cover;border-radius:4px;" onerror="this.style.display=\'none\'"><span style="color:#10b981; font-size:0.75rem; font-weight:bold; white-space:nowrap;">🖼️ มีรูป</span></div>'
+          ? '<div style="display:flex; align-items:center; gap:4px;"><img src="' + esc(m.image) + '" style="width:36px;height:36px;object-fit:cover;border-radius:4px;" onerror="this.style.display=\\'none\\'"><span style="color:#10b981; font-size:0.75rem; font-weight:bold; white-space:nowrap;">🖼️ มีรูป</span></div>'
           : '<span style="color:#ef4444; font-size:0.75rem; font-weight:bold; white-space:nowrap;">❌ ไม่มีรูป</span>';
 
         html += '<tr>' +
