@@ -1,14 +1,22 @@
-// ===== ระบบสั่งอาหารร้านค้า: Single Bin + Persistent Sessions (Render Fix) + Client Compression + Collapsed Categories =====
+// ===== ระบบสั่งอาหารร้านค้า: 3 Bins (แยก ภาพ + เมนู + ท็อปปิ้ง) + Persistent Sessions + Client Compression =====
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3000;
-const DATA_FILE = path.join(__dirname, 'data.json');
 
-const JSONBIN_ID = process.env.JSONBIN_ID || '6ad9eacdffd5d1605382454d'; 
+// แยกไฟล์ Local Fallback 3 ไฟล์
+const DATA_MENU_FILE = path.join(__dirname, 'data_menu.json');
+const DATA_TOPPINGS_FILE = path.join(__dirname, 'data_toppings.json');
+const DATA_IMAGES_FILE = path.join(__dirname, 'data_images.json');
+const LEGACY_DATA_FILE = path.join(__dirname, 'data.json');
+
+// ตั้งค่า 3 JSONBin IDs
 const JSONBIN_KEY = process.env.JSONBIN_KEY || '$2a$10$8u3JlCEVMeRuRLHXIL/R/OT0QICvvBrsx2LQykKP4jv/rJD5qN2je'; 
+const JSONBIN_MENU_ID = process.env.JSONBIN_MENU_ID || process.env.JSONBIN_ID || '6ad9eacdffd5d1605382454d'; 
+const JSONBIN_TOPPINGS_ID = process.env.JSONBIN_TOPPINGS_ID || '6ae0b22effd5d160538ff865'; // ใส่ Bin ID ท็อปปิ้งที่นี่ หรือผ่าน Environment Variable
+const JSONBIN_IMAGES_ID = process.env.JSONBIN_IMAGES_ID || '6ae0b27fffd5d160538ff96e';   // ใส่ Bin ID รูปภาพที่นี่ หรือผ่าน Environment Variable
 
 const SPICE_LEVELS = ['ไม่พริก', 'เผ็ดน้อย', 'เผ็ดกลาง', 'เผ็ดมาก'];
 
@@ -24,13 +32,14 @@ function checkPw(pw, stored) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// โครงสร้าง DB แยกเป็น 3 ส่วน
 let db = {
+  // BIN 1: เมนู & ระบบหลัก (Menu, Orders, Tables, Options, Settings, Sessions, Users)
   users: [{ username: 'admin', password: hashPw('admin123'), role: 'admin' }],
-  sessions: {}, // เก็บ Session ลง DB ป้องกันล็อกอินหลุดเมื่อ Render Sleep
+  sessions: {},
   menu: [],
   orders: [],
   tables: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
-  toppings: [],
   options: [], 
   settings: { 
     theme: '#e85d04', 
@@ -44,32 +53,85 @@ let db = {
   },
   nextMenuId: 1,
   nextOrderId: 1,
+  nextOptionId: 1,
+
+  // BIN 2: ท็อปปิ้ง (Toppings Bin)
+  toppings: [],
   nextToppingId: 1,
-  nextOptionId: 1
+
+  // BIN 3: รูปภาพ (Images Bin) - เก็บ base64 / URL ภาพเมนู & โลโก้
+  images: {} 
 };
 
+async function fetchJsonBin(binId) {
+  if (!binId || !JSONBIN_KEY) return null;
+  try {
+    const res = await fetch(`https://api.jsonbin.io/v3/b/${binId}/latest`, {
+      headers: { 'X-Master-Key': JSONBIN_KEY }
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json && json.record) return json.record;
+    }
+  } catch(e) {}
+  return null;
+}
+
 async function initStorage() {
-  let loaded = false;
-  if (JSONBIN_ID && JSONBIN_KEY) {
-    try {
-      const res = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_ID}/latest`, {
-        headers: { 'X-Master-Key': JSONBIN_KEY }
-      });
-      if (res.ok) {
-        const json = await res.json();
-        if (json && json.record) {
-          db = { ...db, ...json.record };
-          loaded = true;
-        }
-      }
-    } catch(e) {}
+  // 1. ดึงข้อมูล Bin 1: เมนู & ระบบหลัก
+  let menuRecord = await fetchJsonBin(JSONBIN_MENU_ID);
+  if (!menuRecord && fs.existsSync(DATA_MENU_FILE)) {
+    try { menuRecord = JSON.parse(fs.readFileSync(DATA_MENU_FILE, 'utf8')); } catch(e) {}
+  }
+  if (!menuRecord && fs.existsSync(LEGACY_DATA_FILE)) {
+    try { menuRecord = JSON.parse(fs.readFileSync(LEGACY_DATA_FILE, 'utf8')); } catch(e) {}
   }
 
-  if (!loaded && fs.existsSync(DATA_FILE)) {
-    try {
-      const fileData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-      if (fileData) db = { ...db, ...fileData };
-    } catch(e) {}
+  if (menuRecord) {
+    if (menuRecord.users) db.users = menuRecord.users;
+    if (menuRecord.sessions) db.sessions = menuRecord.sessions;
+    if (menuRecord.menu) db.menu = menuRecord.menu;
+    if (menuRecord.orders) db.orders = menuRecord.orders;
+    if (menuRecord.tables) db.tables = menuRecord.tables;
+    if (menuRecord.options) db.options = menuRecord.options;
+    if (menuRecord.settings) db.settings = { ...db.settings, ...menuRecord.settings };
+    if (menuRecord.nextMenuId) db.nextMenuId = menuRecord.nextMenuId;
+    if (menuRecord.nextOrderId) db.nextOrderId = menuRecord.nextOrderId;
+    if (menuRecord.nextOptionId) db.nextOptionId = menuRecord.nextOptionId;
+  }
+
+  // 2. ดึงข้อมูล Bin 2: ท็อปปิ้ง
+  let toppingsRecord = await fetchJsonBin(JSONBIN_TOPPINGS_ID);
+  if (!toppingsRecord && fs.existsSync(DATA_TOPPINGS_FILE)) {
+    try { toppingsRecord = JSON.parse(fs.readFileSync(DATA_TOPPINGS_FILE, 'utf8')); } catch(e) {}
+  }
+  if (toppingsRecord) {
+    if (Array.isArray(toppingsRecord.toppings)) db.toppings = toppingsRecord.toppings;
+    if (toppingsRecord.nextToppingId) db.nextToppingId = toppingsRecord.nextToppingId;
+  } else if (menuRecord && Array.isArray(menuRecord.toppings)) {
+    // ดึงจาก legacy data ถ้ายังไม่มี Bin ท็อปปิ้งแยก
+    db.toppings = menuRecord.toppings;
+    if (menuRecord.nextToppingId) db.nextToppingId = menuRecord.nextToppingId;
+  }
+
+  // 3. ดึงข้อมูล Bin 3: รูปภาพ
+  let imagesRecord = await fetchJsonBin(JSONBIN_IMAGES_ID);
+  if (!imagesRecord && fs.existsSync(DATA_IMAGES_FILE)) {
+    try { imagesRecord = JSON.parse(fs.readFileSync(DATA_IMAGES_FILE, 'utf8')); } catch(e) {}
+  }
+  if (imagesRecord && imagesRecord.images) {
+    db.images = imagesRecord.images;
+  }
+
+  // Auto-migration: ย้ายภาพเดิมเข้า Bin 3 (Images) ให้อัตโนมัติ
+  if (!db.images) db.images = {};
+  db.menu.forEach(m => {
+    if (m.image && !db.images['menu_' + m.id]) {
+      db.images['menu_' + m.id] = m.image;
+    }
+  });
+  if (db.settings.logo && !db.images['logo']) {
+    db.images['logo'] = db.settings.logo;
   }
 
   // บังคับสิทธิ์แอดมินให้อยู่ในระบบเสมอ (Self-healing Admin)
@@ -116,25 +178,97 @@ async function initStorage() {
   save();
 }
 
-let saveTimer = null;
-function save() {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
-  } catch(e) {}
-  
-  if (JSONBIN_ID && JSONBIN_KEY) {
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_ID}`, {
+// แยกการ บันทึก ออกเป็น 3 Bins อิสระ
+let saveMenuTimer = null, saveToppingsTimer = null, saveImagesTimer = null;
+
+function saveMenu() {
+  const menuData = {
+    users: db.users,
+    sessions: db.sessions,
+    menu: db.menu.map(m => {
+      const { image, ...rest } = m; // ไม่ใส่ base64 ใน bin เมนู เพื่อลดขนาด payload
+      return rest;
+    }),
+    orders: db.orders,
+    tables: db.tables,
+    options: db.options,
+    settings: { ...db.settings, logo: '' }, // ย้ายภาพโลโก้ไปเก็บใน Bin ภาพ
+    nextMenuId: db.nextMenuId,
+    nextOrderId: db.nextOrderId,
+    nextOptionId: db.nextOptionId
+  };
+
+  try { fs.writeFileSync(DATA_MENU_FILE, JSON.stringify(menuData, null, 2)); } catch(e) {}
+
+  if (JSONBIN_MENU_ID && JSONBIN_KEY) {
+    if (saveMenuTimer) clearTimeout(saveMenuTimer);
+    saveMenuTimer = setTimeout(() => {
+      fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_MENU_ID}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Master-Key': JSONBIN_KEY
-        },
-        body: JSON.stringify(db)
+        headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY },
+        body: JSON.stringify(menuData)
       }).catch(e => {});
     }, 1000);
   }
+}
+
+function saveToppings() {
+  const toppingsData = {
+    toppings: db.toppings,
+    nextToppingId: db.nextToppingId
+  };
+
+  try { fs.writeFileSync(DATA_TOPPINGS_FILE, JSON.stringify(toppingsData, null, 2)); } catch(e) {}
+
+  if (JSONBIN_TOPPINGS_ID && JSONBIN_KEY) {
+    if (saveToppingsTimer) clearTimeout(saveToppingsTimer);
+    saveToppingsTimer = setTimeout(() => {
+      fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_TOPPINGS_ID}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY },
+        body: JSON.stringify(toppingsData)
+      }).catch(e => {});
+    }, 1000);
+  }
+}
+
+function saveImages() {
+  const imagesData = {
+    images: db.images || {}
+  };
+
+  try { fs.writeFileSync(DATA_IMAGES_FILE, JSON.stringify(imagesData, null, 2)); } catch(e) {}
+
+  if (JSONBIN_IMAGES_ID && JSONBIN_KEY) {
+    if (saveImagesTimer) clearTimeout(saveImagesTimer);
+    saveImagesTimer = setTimeout(() => {
+      fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_IMAGES_ID}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY },
+        body: JSON.stringify(imagesData)
+      }).catch(e => {});
+    }, 1000);
+  }
+}
+
+function save() {
+  saveMenu();
+  saveToppings();
+  saveImages();
+}
+
+// รวมภาพเมนูกลับคืนให้ Frontend แบบโปร่งใส
+function getMenuWithImages() {
+  return db.menu.map(m => ({
+    ...m,
+    image: db.images['menu_' + m.id] || m.image || ''
+  }));
+}
+function getSettingsWithLogo() {
+  return {
+    ...db.settings,
+    logo: db.images['logo'] || db.settings.logo || ''
+  };
 }
 
 const STATUSES = ['pending', 'cooking', 'served', 'cancelled'];
@@ -224,13 +358,13 @@ const server = http.createServer(async (req, res) => {
         if (db.tables.includes(tableName)) return send(res, 400, { error: 'มีโต๊ะนี้อยู่ในระบบแล้ว' });
         db.tables.push(tableName);
         db.tables.sort((a, b) => String(a).localeCompare(String(b), 'th', { numeric: true }));
-        save();
+        saveMenu();
         return send(res, 201, db.tables);
       }
       if (method === 'DELETE' && id) {
         const tableName = decodeURIComponent(id);
         db.tables = db.tables.filter(t => t !== tableName);
-        save();
+        saveMenu();
         return send(res, 200, db.tables);
       }
     }
@@ -242,14 +376,16 @@ const server = http.createServer(async (req, res) => {
         const t = cleanTopping(body);
         if (!t) return send(res, 400, { error: 'ข้อมูลท็อปปิ้งไม่ถูกต้อง' });
         t.id = db.nextToppingId++;
-        db.toppings.push(t); save();
+        db.toppings.push(t); 
+        saveToppings();
         return send(res, 201, t);
       }
       if (method === 'DELETE' && id) {
         const tid = Number(id);
         db.toppings = db.toppings.filter(t => t.id !== tid);
         db.menu.forEach(m => { m.toppings = (m.toppings || []).filter(x => x !== tid); });
-        save();
+        saveToppings();
+        saveMenu();
         return send(res, 200, db.toppings);
       }
     }
@@ -261,31 +397,35 @@ const server = http.createServer(async (req, res) => {
         const o = cleanOption(body);
         if (!o) return send(res, 400, { error: 'ข้อมูลตัวเลือกไม่ถูกต้อง' });
         o.id = db.nextOptionId++;
-        db.options.push(o); save();
+        db.options.push(o); 
+        saveMenu();
         return send(res, 201, o);
       }
       if (method === 'DELETE' && id) {
         const oid = Number(id);
         db.options = db.options.filter(o => o.id !== oid);
         db.menu.forEach(m => { m.options = (m.options || []).filter(x => x !== oid); });
-        save();
+        saveMenu();
         return send(res, 200, db.options);
       }
     }
 
-    if (part === 'settings' && method === 'GET') return send(res, 200, db.settings);
+    if (part === 'settings' && method === 'GET') return send(res, 200, getSettingsWithLogo());
     if (part === 'settings' && method === 'PUT') {
       if (!need('admin')) return;
       if (body.theme) db.settings.theme = String(body.theme);
       if (body.shopName) db.settings.shopName = String(body.shopName);
-      if (body.logo !== undefined) db.settings.logo = String(body.logo);
+      if (body.logo !== undefined) {
+        db.images['logo'] = String(body.logo);
+        saveImages();
+      }
       if (body.soundType) db.settings.soundType = String(body.soundType);
       if (body.customAudio !== undefined) db.settings.customAudio = String(body.customAudio);
       if (body.soundVolume) db.settings.soundVolume = String(body.soundVolume);
       if (body.loopInterval) db.settings.loopInterval = String(body.loopInterval);
       if (Array.isArray(body.categoryOrder)) db.settings.categoryOrder = body.categoryOrder;
-      save();
-      return send(res, 200, db.settings);
+      saveMenu();
+      return send(res, 200, getSettingsWithLogo());
     }
 
     if (part === 'login' && method === 'POST') {
@@ -296,13 +436,13 @@ const server = http.createServer(async (req, res) => {
       const t = crypto.randomBytes(32).toString('hex');
       if (!db.sessions) db.sessions = {};
       db.sessions[t] = { username: u.username, role: u.role, expires: Date.now() + 12 * 3600e3 };
-      save();
+      saveMenu();
 
       return send(res, 200, { token: t });
     }
     if (part === 'logout' && method === 'POST') {
       if (db.sessions && token) delete db.sessions[token];
-      save();
+      saveMenu();
       return send(res, 200, { ok: true });
     }
     if (part === 'me' && method === 'GET') {
@@ -311,15 +451,23 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (part === 'menu') {
-      if (method === 'GET' && !id) return send(res, 200, db.menu);
+      if (method === 'GET' && !id) return send(res, 200, getMenuWithImages());
       if (!need('admin')) return;
       if (method === 'POST' && !id) {
         const item = cleanMenu(body);
         if (!item) return send(res, 400, { error: 'ข้อมูลเมนูไม่ถูกต้อง' });
         if (!db.nextMenuId) db.nextMenuId = Math.max(...db.menu.map(m => m.id), 0) + 1;
         item.id = db.nextMenuId++;
-        db.menu.push(item); save();
-        return send(res, 201, item);
+        
+        // บันทึกรูปภาพลง Bin รูปภาพ
+        if (item.image) {
+          db.images['menu_' + item.id] = item.image;
+          saveImages();
+        }
+        
+        db.menu.push(item); 
+        saveMenu();
+        return send(res, 201, { ...item, image: db.images['menu_' + item.id] || '' });
       }
       const i = db.menu.findIndex(x => x.id === Number(id));
       if (i < 0) return send(res, 404, { error: 'ไม่พบเมนู' });
@@ -327,10 +475,25 @@ const server = http.createServer(async (req, res) => {
         const item = cleanMenu(body);
         if (!item) return send(res, 400, { error: 'ข้อมูลเมนูไม่ถูกต้อง' });
         item.id = db.menu[i].id;
-        db.menu[i] = item; save();
-        return send(res, 200, item);
+
+        // อัปเดตรูปภาพลง Bin รูปภาพ
+        if (item.image !== undefined) {
+          db.images['menu_' + item.id] = item.image;
+          saveImages();
+        }
+
+        db.menu[i] = item; 
+        saveMenu();
+        return send(res, 200, { ...item, image: db.images['menu_' + item.id] || '' });
       }
-      if (method === 'DELETE') { db.menu.splice(i, 1); save(); return send(res, 200, { ok: true }); }
+      if (method === 'DELETE') { 
+        const delId = db.menu[i].id;
+        db.menu.splice(i, 1); 
+        delete db.images['menu_' + delId];
+        saveMenu(); 
+        saveImages();
+        return send(res, 200, { ok: true }); 
+      }
     }
 
     if (part === 'orders') {
@@ -406,7 +569,8 @@ const server = http.createServer(async (req, res) => {
           status: 'pending',
           createdAt: new Date().toISOString()
         };
-        db.orders.push(order); save();
+        db.orders.push(order); 
+        saveMenu();
         return send(res, 201, order);
       }
       if (method === 'GET' && id) {
@@ -424,13 +588,14 @@ const server = http.createServer(async (req, res) => {
         const o = db.orders.find(x => x.id === Number(id));
         if (!o) return send(res, 404, { error: 'ไม่พบออเดอร์' });
         if (!STATUSES.includes(body.status)) return send(res, 400, { error: 'สถานะไม่ถูกต้อง' });
-        o.status = body.status; save();
+        o.status = body.status; 
+        saveMenu();
         return send(res, 200, o);
       }
       if (method === 'DELETE' && !id) {
         if (!need('admin')) return;
         db.orders = [];
-        save();
+        saveMenu();
         return send(res, 200, { ok: true });
       }
     }
@@ -445,7 +610,8 @@ const server = http.createServer(async (req, res) => {
         if (String(password || '').length < 6) return send(res, 400, { error: 'รหัสผ่านต้องยาวอย่างน้อย 6 ตัว' });
         if (!['admin', 'staff'].includes(role)) return send(res, 400, { error: 'สิทธิ์ไม่ถูกต้อง' });
         if (db.users.some(u => u.username === username)) return send(res, 400, { error: 'มีชื่อผู้ใช้นี้แล้ว' });
-        db.users.push({ username: username, password: hashPw(password), role: role }); save();
+        db.users.push({ username: username, password: hashPw(password), role: role }); 
+        saveMenu();
         return send(res, 201, { username: username, role: role });
       }
       if (method === 'DELETE' && id) {
@@ -457,7 +623,7 @@ const server = http.createServer(async (req, res) => {
             if (s.username === name) delete db.sessions[t];
           }
         }
-        save();
+        saveMenu();
         return send(res, 200, { ok: true });
       }
     }
@@ -471,7 +637,7 @@ const server = http.createServer(async (req, res) => {
 
 initStorage().then(() => {
   server.listen(PORT, '0.0.0.0', () => {
-    console.log('===== เซิร์ฟเวอร์ทำงานแล้ว =====');
+    console.log('===== เซิร์ฟเวอร์ทำงานแล้ว (ระบบ 3 Bins พร้อมใช้งาน) =====');
   });
 });
 
