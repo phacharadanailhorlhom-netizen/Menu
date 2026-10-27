@@ -741,7 +741,8 @@ loadSettings();
 
 const SHOP_BODY = `
 <header>
-  <div class="brand">
+  <div class="brand" style="cursor: pointer;" ondblclick="location.href='/admin'">
+
     <img class="shopLogo" hidden alt="Logo">
     <h1 id="shopNameText">เลยมาตำ</h1>
   </div>
