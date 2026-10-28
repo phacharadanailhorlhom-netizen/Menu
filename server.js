@@ -2336,7 +2336,7 @@ async function init() {
   $('who').textContent = me ? me.username + ' (' + (me.role === 'admin' ? 'ผู้ดูแล' : 'พนักงาน') + ')' : '';
   if (!me) return;
 
-  // 🟢 สั่งให้หน้าจอเปิดค้างไว้ทันทีเมื่อเข้าสู่ระบบ
+  // 🟢 สั่งให้หน้าจอเปิดค้างไว้ทันทีเมื่อเข้าสู่ระบบหลังร้าน
   enableKeepScreenOn();
 
   document.querySelectorAll('.adminOnly').forEach(el => { el.hidden = me.role !== 'admin'; });
@@ -2348,9 +2348,7 @@ async function init() {
   if (me.role === 'admin') { loadMenu(); loadUsers(); loadToppings(); loadOptions(); }
 }
 
-init(); // 🟢 สั่งให้ทำงานเมื่อโหลดสคริปต์เสร็จสิ้น
-`;
-
+init();
 `;
 
 function page(title, bodyHtml, script) {
@@ -2361,3 +2359,4 @@ function page(title, bodyHtml, script) {
 }
 const SHOP_PAGE = page('สั่งอาหาร', SHOP_BODY, SHOP_JS);
 const ADMIN_PAGE = page('หลังร้าน', ADMIN_BODY, ADMIN_JS);
+
