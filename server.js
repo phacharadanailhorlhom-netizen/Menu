@@ -32,9 +32,18 @@ function checkPw(pw, stored) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// ฟังก์ชันตรวจสอบความสมบูรณ์ของรูปภาพ Base64 / URL
+function isValidImageStr(str) {
+  if (!str || typeof str !== 'string') return false;
+  const s = str.trim();
+  if (s.startsWith('data:image/')) {
+    return s.length > 200; // Base64 ที่สมบูรณ์ต้องมีความยาวมากกว่า 200 ตัวอักษร
+  }
+  return s.startsWith('http://') || s.startsWith('https://');
+}
+
 // โครงสร้าง DB แยกเป็น 3 ส่วน
 let db = {
-  // BIN 1: เมนู & ระบบหลัก (Menu, Orders, Tables, Options, Settings, Sessions, Users)
   users: [{ username: 'admin', password: hashPw('admin123'), role: 'admin' }],
   sessions: {},
   menu: [],
@@ -54,12 +63,8 @@ let db = {
   nextMenuId: 1,
   nextOrderId: 1,
   nextOptionId: 1,
-
-  // BIN 2: ท็อปปิ้ง (Toppings Bin)
   toppings: [],
   nextToppingId: 1,
-
-  // BIN 3: รูปภาพ (Images Bin) - เก็บ base64 / URL ภาพเมนู & โลโก้
   images: {} 
 };
 
@@ -122,18 +127,25 @@ async function initStorage() {
     db.images = imagesRecord.images;
   }
 
-  // Auto-migration: ย้ายภาพเดิมเข้า Bin 3 (Images) ให้อัตโนมัติ
   if (!db.images) db.images = {};
+  
+  // ล้างรูปภาพที่เสียหาย/ไม่สมบูรณ์ออกจากระบบทันที
+  Object.keys(db.images).forEach(k => {
+    if (!isValidImageStr(db.images[k])) {
+      delete db.images[k];
+    }
+  });
+
+  // Auto-migration
   db.menu.forEach(m => {
-    if (m.image && !db.images['menu_' + m.id]) {
+    if (m.image && isValidImageStr(m.image) && !db.images['menu_' + m.id]) {
       db.images['menu_' + m.id] = m.image;
     }
   });
-  if (db.settings.logo && !db.images['logo']) {
+  if (db.settings.logo && isValidImageStr(db.settings.logo) && !db.images['logo']) {
     db.images['logo'] = db.settings.logo;
   }
 
-  // บังคับสิทธิ์แอดมินให้อยู่ในระบบเสมอ (Self-healing Admin)
   if (!db.users || !Array.isArray(db.users) || db.users.length === 0) {
     db.users = [{ username: 'admin', password: hashPw('admin123'), role: 'admin' }];
   } else {
@@ -177,7 +189,6 @@ async function initStorage() {
   save();
 }
 
-// แยกการ บันทึก ออกเป็น 3 Bins อิสระ
 let saveMenuTimer = null, saveToppingsTimer = null, saveImagesTimer = null;
 
 function saveMenu() {
@@ -185,7 +196,7 @@ function saveMenu() {
     users: db.users,
     sessions: db.sessions,
     menu: db.menu.map(m => {
-      const { image, ...rest } = m; // ไม่ใส่ base64 ใน bin เมนู เพื่อลดขนาด payload
+      const { image, ...rest } = m;
       return rest;
     }),
     orders: db.orders,
@@ -232,6 +243,14 @@ function saveToppings() {
 }
 
 function saveImages() {
+  // ลบรูปภาพที่ไม่ได้ถูกใช้งานแล้วออกจาก Bin รูปภาพเพื่อประหยัดโควต้า
+  if (db.images) {
+    const validKeys = new Set(['logo', ...db.menu.map(m => 'menu_' + m.id)]);
+    Object.keys(db.images).forEach(k => {
+      if (!validKeys.has(k)) delete db.images[k];
+    });
+  }
+
   const imagesData = {
     images: db.images || {}
   };
@@ -247,6 +266,7 @@ function saveImages() {
         body: JSON.stringify(imagesData)
       }).then(res => {
         if (!res.ok) console.error('❌ JSONBin Images Save Failed Status:', res.status);
+        else console.log('✅ บันทึกรูปภาพลง JSONBin เรียบร้อย');
       }).catch(e => console.error('❌ JSONBIN Images Save Error:', e));
     }, 1000);
   }
@@ -258,17 +278,16 @@ function save() {
   saveImages();
 }
 
-// รวมภาพเมนูกลับคืนให้ Frontend แบบโปร่งใส
 function getMenuWithImages() {
   return db.menu.map(m => ({
     ...m,
-    image: db.images['menu_' + m.id] || m.image || ''
+    image: (isValidImageStr(db.images['menu_' + m.id]) ? db.images['menu_' + m.id] : (isValidImageStr(m.image) ? m.image : ''))
   }));
 }
 function getSettingsWithLogo() {
   return {
     ...db.settings,
-    logo: db.images['logo'] || db.settings.logo || ''
+    logo: (isValidImageStr(db.images['logo']) ? db.images['logo'] : (isValidImageStr(db.settings.logo) ? db.settings.logo : ''))
   };
 }
 
@@ -339,7 +358,6 @@ const server = http.createServer(async (req, res) => {
     const body = ['POST', 'PUT', 'PATCH'].includes(method) ? await readBody(req) : {};
     const token = (req.headers.authorization || '').replace('Bearer ', '');
     
-    // ดึง Session จาก db ถาวร
     const sess = db.sessions ? db.sessions[token] : null;
     const user = sess && sess.expires > Date.now() ? sess : null;
 
@@ -416,8 +434,7 @@ const server = http.createServer(async (req, res) => {
       if (!need('admin')) return;
       if (body.theme) db.settings.theme = String(body.theme);
       if (body.shopName) db.settings.shopName = String(body.shopName);
-      // ป้องกันการทับโลโก้ด้วยค่าว่าง
-      if (body.logo && body.logo.trim() !== '') {
+      if (body.logo && isValidImageStr(body.logo)) {
         db.images['logo'] = String(body.logo).trim();
         saveImages();
       }
@@ -461,7 +478,7 @@ const server = http.createServer(async (req, res) => {
         if (!db.nextMenuId) db.nextMenuId = Math.max(...db.menu.map(m => m.id), 0) + 1;
         item.id = db.nextMenuId++;
         
-        if (item.image) {
+        if (item.image && isValidImageStr(item.image)) {
           db.images['menu_' + item.id] = item.image;
           saveImages();
         }
@@ -477,8 +494,8 @@ const server = http.createServer(async (req, res) => {
         if (!item) return send(res, 400, { error: 'ข้อมูลเมนูไม่ถูกต้อง' });
         item.id = db.menu[i].id;
 
-        // แก้ปัญหารูปหาย: อัปเดตรูปเฉพาะเมื่อส่งรูปใหม่มาจริงเท่านั้น
-        if (body.image && body.image.trim() !== '') {
+        // อัปเดตรูปเฉพาะเมื่อรูปที่ส่งมามีความสมบูรณ์
+        if (body.image && isValidImageStr(body.image)) {
           db.images['menu_' + item.id] = body.image.trim();
           saveImages();
         }
@@ -1220,7 +1237,7 @@ const ADMIN_BODY = `
         <p class="muted" style="margin:4px 0; font-size:0.9rem;">กำลังโหลดรายการท็อปปิ้ง...</p>
       </div>
 
-      <button type="submit" class="primary">บันทึกการแก้ไขเมนู</button>
+      <button type="submit" class="primary" id="mSubmitBtn">บันทึกการแก้ไขเมนู</button>
       <button type="button" id="mReset" onclick="resetMenuForm()" style="width:100%; margin-top:6px;">ล้างฟอร์ม</button>
     </form>
     <h3>รายการเมนูทั้งหมดในระบบ (แยกตามหมวดหมู่)</h3>
@@ -1365,15 +1382,19 @@ window.currentSoundVol = 1.0;
 window.currentLoopInterval = 5000;
 window.currentActiveAudio = null;
 
-// 1. ระบบบีบอัดภาพเมนูอัตโนมัติ (ปรับให้ไฟล์เบาเป็นพิเศษ ~20-30KB เพื่อให้ JSONBin เก็บได้หลายรูป)
+// 1. ระบบบีบอัดภาพเมนูอัตโนมัติ (ขนาด 350px / Quality 0.45 ไฟล์เบาเพียง 8-12KB)
 function handleFile(e) {
   const file = e.target.files[0];
   if (!file) return;
+
+  const btn = $('mSubmitBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ กำลังประมวลผลรูปภาพ...'; }
+
   const reader = new FileReader();
   reader.onload = function(evt) {
     const img = new Image();
     img.onload = function() {
-      const MAX_WIDTH = 500, MAX_HEIGHT = 500;
+      const MAX_WIDTH = 350, MAX_HEIGHT = 350;
       let width = img.width, height = img.height;
       if (width > height) {
         if (width > MAX_WIDTH) { height = Math.round(height * (MAX_WIDTH / width)); width = MAX_WIDTH; }
@@ -1384,7 +1405,12 @@ function handleFile(e) {
       canvas.width = width; canvas.height = height;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, width, height);
-      $('mImg').value = canvas.toDataURL('image/jpeg', 0.55);
+      $('mImg').value = canvas.toDataURL('image/jpeg', 0.45);
+
+      if (btn) { btn.disabled = false; btn.textContent = 'บันทึกการแก้ไขเมนู'; }
+    };
+    img.onerror = function() {
+      if (btn) { btn.disabled = false; btn.textContent = 'บันทึกการแก้ไขเมนู'; }
     };
     img.src = evt.target.result;
   };
@@ -1399,7 +1425,7 @@ function handleLogoFile(e) {
   reader.onload = function(evt) {
     const img = new Image();
     img.onload = function() {
-      const MAX_SIZE = 250;
+      const MAX_SIZE = 200;
       let width = img.width, height = img.height;
       if (width > height) {
         if (width > MAX_SIZE) { height = Math.round(height * (MAX_SIZE / width)); width = MAX_SIZE; }
@@ -1410,7 +1436,7 @@ function handleLogoFile(e) {
       canvas.width = width; canvas.height = height;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, width, height);
-      const compressed = canvas.toDataURL('image/jpeg', 0.6);
+      const compressed = canvas.toDataURL('image/jpeg', 0.5);
       $('setLogo').value = compressed;
       const prev = $('logoPreview');
       if (prev) { prev.src = compressed; prev.hidden = false; }
@@ -1598,22 +1624,6 @@ function testSound() {
   const v = $('setVol') ? $('setVol').value : '1.0';
   const ca = $('setCustomAudio') ? $('setCustomAudio').value : '';
   playSound(t, v, ca);
-}
-
-async function init() {
-  try { me = await api('/api/me'); } catch (e) { me = null; localStorage.removeItem('token'); }
-  $('loginBox').hidden = !!me;
-  $('app').hidden = !me;
-  $('logoutBtn').hidden = !me;
-  $('who').textContent = me ? me.username + ' (' + (me.role === 'admin' ? 'ผู้ดูแล' : 'พนักงาน') + ')' : '';
-  if (!me) return;
-  document.querySelectorAll('.adminOnly').forEach(el => { el.hidden = me.role !== 'admin'; });
-  if ($('soundUnlockBar')) $('soundUnlockBar').hidden = false;
-  switchTab('orders');
-  loadOrders();
-  loadTables();
-  loadSettingsForm();
-  if (me.role === 'admin') { loadMenu(); loadUsers(); loadToppings(); loadOptions(); }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -2359,4 +2369,3 @@ function page(title, bodyHtml, script) {
 }
 const SHOP_PAGE = page('สั่งอาหาร', SHOP_BODY, SHOP_JS);
 const ADMIN_PAGE = page('หลังร้าน', ADMIN_BODY, ADMIN_JS);
-
