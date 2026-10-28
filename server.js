@@ -2307,7 +2307,50 @@ async function delUser(name) {
   try { await api('/api/users/' + encodeURIComponent(name), { method: 'DELETE' }); loadUsers(); }
   catch (e) { alert(e.message); }
 }
-init();
+
+// ===== ระบบป้องกันหน้าจอดับเฉพาะหน้าแอดมิน (Screen Wake Lock) =====
+let wakeLock = null;
+
+async function enableKeepScreenOn() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      console.log('💡 เปิดโหมดค้างหน้าจอหลังร้านเรียบร้อยแล้ว');
+    }
+  } catch (err) {
+    console.log('Screen Wake Lock Error:', err.message);
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (wakeLock !== null && document.visibilityState === 'visible') {
+    enableKeepScreenOn();
+  }
+});
+
+async function init() {
+  try { me = await api('/api/me'); } catch (e) { me = null; localStorage.removeItem('token'); }
+  $('loginBox').hidden = !!me;
+  $('app').hidden = !me;
+  $('logoutBtn').hidden = !me;
+  $('who').textContent = me ? me.username + ' (' + (me.role === 'admin' ? 'ผู้ดูแล' : 'พนักงาน') + ')' : '';
+  if (!me) return;
+
+  // 🟢 สั่งให้หน้าจอเปิดค้างไว้ทันทีเมื่อเข้าสู่ระบบ
+  enableKeepScreenOn();
+
+  document.querySelectorAll('.adminOnly').forEach(el => { el.hidden = me.role !== 'admin'; });
+  if ($('soundUnlockBar')) $('soundUnlockBar').hidden = false;
+  switchTab('orders');
+  loadOrders();
+  loadTables();
+  loadSettingsForm();
+  if (me.role === 'admin') { loadMenu(); loadUsers(); loadToppings(); loadOptions(); }
+}
+
+init(); // 🟢 สั่งให้ทำงานเมื่อโหลดสคริปต์เสร็จสิ้น
+`;
+
 `;
 
 function page(title, bodyHtml, script) {
