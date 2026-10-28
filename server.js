@@ -15,8 +15,8 @@ const LEGACY_DATA_FILE = path.join(__dirname, 'data.json');
 // ตั้งค่า 3 JSONBin IDs
 const JSONBIN_KEY = process.env.JSONBIN_KEY || '$2a$10$8u3JlCEVMeRuRLHXIL/R/OT0QICvvBrsx2LQykKP4jv/rJD5qN2je'; 
 const JSONBIN_MENU_ID = process.env.JSONBIN_MENU_ID || process.env.JSONBIN_ID || '6ad9eacdffd5d1605382454d'; 
-const JSONBIN_TOPPINGS_ID = process.env.JSONBIN_TOPPINGS_ID || '6ae0b22effd5d160538ff865'; // ใส่ Bin ID ท็อปปิ้งที่นี่ หรือผ่าน Environment Variable
-const JSONBIN_IMAGES_ID = process.env.JSONBIN_IMAGES_ID || '6ae0b27fffd5d160538ff96e';   // ใส่ Bin ID รูปภาพที่นี่ หรือผ่าน Environment Variable
+const JSONBIN_TOPPINGS_ID = process.env.JSONBIN_TOPPINGS_ID || '6ae0b22effd5d160538ff865';
+const JSONBIN_IMAGES_ID = process.env.JSONBIN_IMAGES_ID || '6ae0b27fffd5d160538ff96e';
 
 const SPICE_LEVELS = ['ไม่พริก', 'เผ็ดน้อย', 'เผ็ดกลาง', 'เผ็ดมาก'];
 
@@ -109,7 +109,6 @@ async function initStorage() {
     if (Array.isArray(toppingsRecord.toppings)) db.toppings = toppingsRecord.toppings;
     if (toppingsRecord.nextToppingId) db.nextToppingId = toppingsRecord.nextToppingId;
   } else if (menuRecord && Array.isArray(menuRecord.toppings)) {
-    // ดึงจาก legacy data ถ้ายังไม่มี Bin ท็อปปิ้งแยก
     db.toppings = menuRecord.toppings;
     if (menuRecord.nextToppingId) db.nextToppingId = menuRecord.nextToppingId;
   }
@@ -192,7 +191,7 @@ function saveMenu() {
     orders: db.orders,
     tables: db.tables,
     options: db.options,
-    settings: { ...db.settings, logo: '' }, // ย้ายภาพโลโก้ไปเก็บใน Bin ภาพ
+    settings: { ...db.settings, logo: '' },
     nextMenuId: db.nextMenuId,
     nextOrderId: db.nextOrderId,
     nextOptionId: db.nextOptionId
@@ -207,7 +206,7 @@ function saveMenu() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY },
         body: JSON.stringify(menuData)
-      }).catch(e => {});
+      }).catch(e => console.error('❌ JSONBIN Menu Save Error:', e));
     }, 1000);
   }
 }
@@ -227,7 +226,7 @@ function saveToppings() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY },
         body: JSON.stringify(toppingsData)
-      }).catch(e => {});
+      }).catch(e => console.error('❌ JSONBIN Toppings Save Error:', e));
     }, 1000);
   }
 }
@@ -246,7 +245,9 @@ function saveImages() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY },
         body: JSON.stringify(imagesData)
-      }).catch(e => {});
+      }).then(res => {
+        if (!res.ok) console.error('❌ JSONBin Images Save Failed Status:', res.status);
+      }).catch(e => console.error('❌ JSONBIN Images Save Error:', e));
     }, 1000);
   }
 }
@@ -415,8 +416,9 @@ const server = http.createServer(async (req, res) => {
       if (!need('admin')) return;
       if (body.theme) db.settings.theme = String(body.theme);
       if (body.shopName) db.settings.shopName = String(body.shopName);
-      if (body.logo !== undefined) {
-        db.images['logo'] = String(body.logo);
+      // ป้องกันการทับโลโก้ด้วยค่าว่าง
+      if (body.logo && body.logo.trim() !== '') {
+        db.images['logo'] = String(body.logo).trim();
         saveImages();
       }
       if (body.soundType) db.settings.soundType = String(body.soundType);
@@ -459,7 +461,6 @@ const server = http.createServer(async (req, res) => {
         if (!db.nextMenuId) db.nextMenuId = Math.max(...db.menu.map(m => m.id), 0) + 1;
         item.id = db.nextMenuId++;
         
-        // บันทึกรูปภาพลง Bin รูปภาพ
         if (item.image) {
           db.images['menu_' + item.id] = item.image;
           saveImages();
@@ -476,9 +477,9 @@ const server = http.createServer(async (req, res) => {
         if (!item) return send(res, 400, { error: 'ข้อมูลเมนูไม่ถูกต้อง' });
         item.id = db.menu[i].id;
 
-        // อัปเดตรูปภาพลง Bin รูปภาพ
-        if (item.image !== undefined) {
-          db.images['menu_' + item.id] = item.image;
+        // แก้ปัญหารูปหาย: อัปเดตรูปเฉพาะเมื่อส่งรูปใหม่มาจริงเท่านั้น
+        if (body.image && body.image.trim() !== '') {
+          db.images['menu_' + item.id] = body.image.trim();
           saveImages();
         }
 
@@ -742,7 +743,6 @@ loadSettings();
 const SHOP_BODY = `
 <header>
   <div class="brand" style="cursor: pointer;" ondblclick="location.href='/admin'">
-
     <img class="shopLogo" hidden alt="Logo">
     <h1 id="shopNameText">เลยมาตำ</h1>
   </div>
@@ -1365,7 +1365,7 @@ window.currentSoundVol = 1.0;
 window.currentLoopInterval = 5000;
 window.currentActiveAudio = null;
 
-// 1. ระบบบีบอัดภาพเมนูอัตโนมัติ (Canvas Compression)
+// 1. ระบบบีบอัดภาพเมนูอัตโนมัติ (ปรับให้ไฟล์เบาเป็นพิเศษ ~20-30KB เพื่อให้ JSONBin เก็บได้หลายรูป)
 function handleFile(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -1373,7 +1373,7 @@ function handleFile(e) {
   reader.onload = function(evt) {
     const img = new Image();
     img.onload = function() {
-      const MAX_WIDTH = 800, MAX_HEIGHT = 800;
+      const MAX_WIDTH = 500, MAX_HEIGHT = 500;
       let width = img.width, height = img.height;
       if (width > height) {
         if (width > MAX_WIDTH) { height = Math.round(height * (MAX_WIDTH / width)); width = MAX_WIDTH; }
@@ -1384,7 +1384,7 @@ function handleFile(e) {
       canvas.width = width; canvas.height = height;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, width, height);
-      $('mImg').value = canvas.toDataURL('image/jpeg', 0.7);
+      $('mImg').value = canvas.toDataURL('image/jpeg', 0.55);
     };
     img.src = evt.target.result;
   };
@@ -1399,7 +1399,7 @@ function handleLogoFile(e) {
   reader.onload = function(evt) {
     const img = new Image();
     img.onload = function() {
-      const MAX_SIZE = 300;
+      const MAX_SIZE = 250;
       let width = img.width, height = img.height;
       if (width > height) {
         if (width > MAX_SIZE) { height = Math.round(height * (MAX_SIZE / width)); width = MAX_SIZE; }
@@ -1410,7 +1410,7 @@ function handleLogoFile(e) {
       canvas.width = width; canvas.height = height;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, width, height);
-      const compressed = canvas.toDataURL('image/jpeg', 0.8);
+      const compressed = canvas.toDataURL('image/jpeg', 0.6);
       $('setLogo').value = compressed;
       const prev = $('logoPreview');
       if (prev) { prev.src = compressed; prev.hidden = false; }
@@ -2027,7 +2027,6 @@ function toggleMenuTopping(id, checked) {
   renderMenuToppingsCheckboxes();
 }
 
-// 4. แสดงสถานะรูปภาพ + ย่อหมวดหมู่เป็นค่าเริ่มต้น
 async function loadMenu() {
   menuData = await api('/api/menu');
   const cats = [...new Set(menuData.map(m => m.category))].filter(Boolean);
