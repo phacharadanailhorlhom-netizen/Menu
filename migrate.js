@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 // 1. ใส่ Connection String ของ MongoDB Atlas (อย่าลืมแก้รหัสผ่านจริง)
-const MONGODB_URI = 'mongodb+srv://phacharadanailhorlhom_db_user:รหัสผ่านจริง@menuimage.5nplzzm.mongodb.net/shop_db?retryWrites=true&w=majority';
+const MONGODB_URI = 'mongodb+srv://phacharadanailhorlhom_db_user:KF5VLaewW1JZOnw2@menuimage.5nplzzm.mongodb.net/shop_db?retryWrites=true&w=majority';
 
 // 2. ใส่ BIN ID ทั้ง 3 ตัวของคุณ
 const BIN_IDS = [
