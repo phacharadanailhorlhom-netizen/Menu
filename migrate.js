@@ -5,13 +5,13 @@ const MONGODB_URI = 'mongodb+srv://phacharadanailhorlhom_db_user:รหัสผ
 
 // 2. ใส่ BIN ID ทั้ง 3 ตัวของคุณ
 const BIN_IDS = [
-  'ใส่_BIN_ID_ตัวที่_1',
-  'ใส่_BIN_ID_ตัวที่_2',
-  'ใส่_BIN_ID_ตัวที่_3'
+  '6ad9eacdffd5d1605382454d',
+  '6ae0b22effd5d160538ff865',
+  '6ae0b27fffd5d160538ff96e'
 ];
 
 // 3. ใส่ Master Key จาก JSONBin (ถ้ามี)
-const MASTER_KEY = 'ใส่_MASTER_KEY_ที่นี่_ถ้ามี';
+const MASTER_KEY = '$2a$10$8u3JlCEVMeRuRLHXIL/R/OT0QICvvBrsx2LQykKP4jv/rJD5qN2je';
 
 const storeSchema = new mongoose.Schema({}, { strict: false });
 const StoreModel = mongoose.model('StoreData', storeSchema);
