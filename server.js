@@ -6,7 +6,8 @@ const crypto = require('crypto');
 const mongoose = require('mongoose');
 
 const PORT = process.env.PORT || 3000;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://phacharadanailhorlhom_db_user:YOUR_PASSWORD@menuimage.5nplzzm.mongodb.net/shop_db?retryWrites=true&w=majority';
+const MONGODB_URI = process.env.MONGODB_URI;
+
 
 // ตั้งค่า BIN IDs และ MASTER KEY สำหรับย้ายข้อมูล
 const BIN_IDS = [
