@@ -81,8 +81,60 @@ async function fetchJsonBin(binId) {
   } catch(e) {}
   return null;
 }
+// ===== สคริปต์ย้ายข้อมูลจาก JSONBin เข้า MongoDB อัตโนมัติ =====
+async function autoMigrateJSONBin() {
+  const BIN_IDS = [
+    '6ae0b27fffd5d160538ff96e',
+    '6ae0b22effd5d160538ff865',
+    '6ad9eacdffd5d1605382454d'
+  ];
+  const MASTER_KEY = '$2a$10$8u3JlCEVMeRuRLHXIL/R/OT0QICvvBrsx2LQykKP4jv/rJD5qN2je'; // ถ้าไม่มีให้ใส่ ''
+
+  try {
+    const headers = {};
+    if (MASTER_KEY) headers['X-Master-Key'] = MASTER_KEY;
+
+    const fetches = BIN_IDS.map(id => 
+      fetch(`https://api.jsonbin.io/v3/b/${id}/latest`, { headers })
+        .then(r => r.json())
+        .then(res => res.record || {})
+        .catch(() => ({}))
+    );
+
+    const [b1, b2, b3] = await Promise.all(fetches);
+    
+    // ถ้าระบบเจอข้อมูลเดิมใน JSONBin จะนำมาอัปเดตลง MongoDB Atlas
+    if (b1.menu || b2.menu || b3.menu) {
+      await StoreModel.updateOne(
+        { key: 'main_store' },
+        {
+          $set: {
+            key: 'main_store',
+            menu: b1.menu || b2.menu || b3.menu || [],
+            toppings: b1.toppings || b2.toppings || b3.toppings || [],
+            options: b1.options || b2.options || b3.options || [],
+            settings: { ...(b1.settings || {}), ...(b2.settings || {}), ...(b3.settings || {}) },
+            images: { ...(b1.images || {}), ...(b2.images || {}), ...(b3.images || {}) }
+          }
+        },
+        { upsert: true }
+      );
+      console.log('🎉 ✅ ย้ายข้อมูลจาก 3 Bin เข้า MongoDB Atlas สำเร็จแล้ว!');
+    }
+  } catch (e) {
+    console.error('❌ Migration Error:', e.message);
+  }
+}
 
 async function initStorage() {
+  try {
+    await mongoose.connect(MONGODB_URI);
+    console.log('✅ เชื่อมต่อ MongoDB Atlas สำเร็จ');
+
+    // 🟢 รันย้ายข้อมูลจาก JSONBin อัตโนมัติ
+    await autoMigrateJSONBin();
+
+    let record = await StoreModel.findOne({ key: 'main_store' });
   // 1. ดึงข้อมูล Bin 1: เมนู & ระบบหลัก
   let menuRecord = await fetchJsonBin(JSONBIN_MENU_ID);
   if (!menuRecord && fs.existsSync(DATA_MENU_FILE)) {
