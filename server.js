@@ -1,22 +1,20 @@
-// ===== ระบบสั่งอาหารร้านค้า: 3 Bins (แยก ภาพ + เมนู + ท็อปปิ้ง) + Persistent Sessions + Client Compression =====
+// ===== ระบบสั่งอาหารร้านค้า: MongoDB Atlas + Auto-Migration จาก 3 JSONBins + Screen Wake Lock =====
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 
 const PORT = process.env.PORT || 3000;
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://phacharadanailhorlhom_db_user:YOUR_PASSWORD@menuimage.5nplzzm.mongodb.net/shop_db?retryWrites=true&w=majority';
 
-// แยกไฟล์ Local Fallback 3 ไฟล์
-const DATA_MENU_FILE = path.join(__dirname, 'data_menu.json');
-const DATA_TOPPINGS_FILE = path.join(__dirname, 'data_toppings.json');
-const DATA_IMAGES_FILE = path.join(__dirname, 'data_images.json');
-const LEGACY_DATA_FILE = path.join(__dirname, 'data.json');
-
-// ตั้งค่า 3 JSONBin IDs
-const JSONBIN_KEY = process.env.JSONBIN_KEY || '$2a$10$8u3JlCEVMeRuRLHXIL/R/OT0QICvvBrsx2LQykKP4jv/rJD5qN2je'; 
-const JSONBIN_MENU_ID = process.env.JSONBIN_MENU_ID || process.env.JSONBIN_ID || '6ad9eacdffd5d1605382454d'; 
-const JSONBIN_TOPPINGS_ID = process.env.JSONBIN_TOPPINGS_ID || '6ae0b22effd5d160538ff865';
-const JSONBIN_IMAGES_ID = process.env.JSONBIN_IMAGES_ID || '6ae0b27fffd5d160538ff96e';
+// ตั้งค่า BIN IDs และ MASTER KEY สำหรับย้ายข้อมูล
+const BIN_IDS = [
+  '6ae0b27fffd5d160538ff96e', // Bin 1: รูปภาพ
+  '6ae0b22effd5d160538ff865', // Bin 2: ท็อปปิ้ง
+  '6ad9eacdffd5d1605382454d'  // Bin 3: เมนู & ระบบหลัก
+];
+const MASTER_KEY = process.env.JSONBIN_KEY || '$2a$10$8u3JlCEVMeRuRLHXIL/R/OT0QICvvBrsx2LQykKP4jv/rJD5qN2je';
 
 const SPICE_LEVELS = ['ไม่พริก', 'เผ็ดน้อย', 'เผ็ดกลาง', 'เผ็ดมาก'];
 
@@ -32,17 +30,35 @@ function checkPw(pw, stored) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-// ฟังก์ชันตรวจสอบความสมบูรณ์ของรูปภาพ Base64 / URL
 function isValidImageStr(str) {
   if (!str || typeof str !== 'string') return false;
   const s = str.trim();
   if (s.startsWith('data:image/')) {
-    return s.length > 200; // Base64 ที่สมบูรณ์ต้องมีความยาวมากกว่า 200 ตัวอักษร
+    return s.length > 200;
   }
   return s.startsWith('http://') || s.startsWith('https://');
 }
 
-// โครงสร้าง DB แยกเป็น 3 ส่วน
+// Mongoose Schema สำหรับ MongoDB Atlas
+const storeDataSchema = new mongoose.Schema({
+  key: { type: String, default: 'main_store' },
+  users: Array,
+  sessions: Object,
+  menu: Array,
+  orders: Array,
+  tables: Array,
+  options: Array,
+  toppings: Array,
+  settings: Object,
+  images: Object,
+  nextMenuId: Number,
+  nextOrderId: Number,
+  nextOptionId: Number,
+  nextToppingId: Number
+}, { timestamps: true, strict: false });
+
+const StoreModel = mongoose.model('StoreData', storeDataSchema);
+
 let db = {
   users: [{ username: 'admin', password: hashPw('admin123'), role: 'admin' }],
   sessions: {},
@@ -68,28 +84,8 @@ let db = {
   images: {} 
 };
 
-async function fetchJsonBin(binId) {
-  if (!binId || !JSONBIN_KEY) return null;
-  try {
-    const res = await fetch(`https://api.jsonbin.io/v3/b/${binId}/latest`, {
-      headers: { 'X-Master-Key': JSONBIN_KEY }
-    });
-    if (res.ok) {
-      const json = await res.json();
-      if (json && json.record) return json.record;
-    }
-  } catch(e) {}
-  return null;
-}
-// ===== สคริปต์ย้ายข้อมูลจาก JSONBin เข้า MongoDB อัตโนมัติ =====
+// 🟢 ฟังก์ชันย้ายข้อมูลจาก 3 JSONBins เข้า MongoDB Atlas อัตโนมัติ
 async function autoMigrateJSONBin() {
-  const BIN_IDS = [
-    '6ae0b27fffd5d160538ff96e',
-    '6ae0b22effd5d160538ff865',
-    '6ad9eacdffd5d1605382454d'
-  ];
-  const MASTER_KEY = '$2a$10$8u3JlCEVMeRuRLHXIL/R/OT0QICvvBrsx2LQykKP4jv/rJD5qN2je'; // ถ้าไม่มีให้ใส่ ''
-
   try {
     const headers = {};
     if (MASTER_KEY) headers['X-Master-Key'] = MASTER_KEY;
@@ -103,23 +99,28 @@ async function autoMigrateJSONBin() {
 
     const [b1, b2, b3] = await Promise.all(fetches);
     
-    // ถ้าระบบเจอข้อมูลเดิมใน JSONBin จะนำมาอัปเดตลง MongoDB Atlas
-    if (b1.menu || b2.menu || b3.menu) {
+    if (b1.menu || b2.menu || b3.menu || b1.toppings || b2.toppings || b3.toppings || b1.images || b2.images || b3.images) {
+      const mergedData = {
+        users: b1.users || b2.users || b3.users || db.users,
+        menu: b1.menu || b2.menu || b3.menu || [],
+        toppings: b1.toppings || b2.toppings || b3.toppings || [],
+        options: b1.options || b2.options || b3.options || [],
+        tables: b1.tables || b2.tables || b3.tables || db.tables,
+        orders: b1.orders || b2.orders || b3.orders || [],
+        settings: { ...(b1.settings || {}), ...(b2.settings || {}), ...(b3.settings || {}) },
+        images: { ...(b1.images || {}), ...(b2.images || {}), ...(b3.images || {}) },
+        nextMenuId: b1.nextMenuId || b2.nextMenuId || b3.nextMenuId || 1,
+        nextOrderId: b1.nextOrderId || b2.nextOrderId || b3.nextOrderId || 1,
+        nextOptionId: b1.nextOptionId || b2.nextOptionId || b3.nextOptionId || 1,
+        nextToppingId: b1.nextToppingId || b2.nextToppingId || b3.nextToppingId || 1
+      };
+
       await StoreModel.updateOne(
         { key: 'main_store' },
-        {
-          $set: {
-            key: 'main_store',
-            menu: b1.menu || b2.menu || b3.menu || [],
-            toppings: b1.toppings || b2.toppings || b3.toppings || [],
-            options: b1.options || b2.options || b3.options || [],
-            settings: { ...(b1.settings || {}), ...(b2.settings || {}), ...(b3.settings || {}) },
-            images: { ...(b1.images || {}), ...(b2.images || {}), ...(b3.images || {}) }
-          }
-        },
+        { $set: { key: 'main_store', ...mergedData } },
         { upsert: true }
       );
-      console.log('🎉 ✅ ย้ายข้อมูลจาก 3 Bin เข้า MongoDB Atlas สำเร็จแล้ว!');
+      console.log('🎉 ✅ ย้ายข้อมูลจาก 3 Bin เข้า MongoDB Atlas สำเร็จเรียบร้อย!');
     }
   } catch (e) {
     console.error('❌ Migration Error:', e.message);
@@ -131,204 +132,90 @@ async function initStorage() {
     await mongoose.connect(MONGODB_URI);
     console.log('✅ เชื่อมต่อ MongoDB Atlas สำเร็จ');
 
-    // 🟢 รันย้ายข้อมูลจาก JSONBin อัตโนมัติ
-    await autoMigrateJSONBin();
-
+    // ตรวจสอบว่าใน MongoDB Atlas มีข้อมูลหรือยัง หากยังไม่มีให้รันย้ายข้อมูลจาก JSONBin อัตโนมัติ
     let record = await StoreModel.findOne({ key: 'main_store' });
-  // 1. ดึงข้อมูล Bin 1: เมนู & ระบบหลัก
-  let menuRecord = await fetchJsonBin(JSONBIN_MENU_ID);
-  if (!menuRecord && fs.existsSync(DATA_MENU_FILE)) {
-    try { menuRecord = JSON.parse(fs.readFileSync(DATA_MENU_FILE, 'utf8')); } catch(e) {}
-  }
-  if (!menuRecord && fs.existsSync(LEGACY_DATA_FILE)) {
-    try { menuRecord = JSON.parse(fs.readFileSync(LEGACY_DATA_FILE, 'utf8')); } catch(e) {}
-  }
-
-  if (menuRecord) {
-    if (menuRecord.users) db.users = menuRecord.users;
-    if (menuRecord.sessions) db.sessions = menuRecord.sessions;
-    if (menuRecord.menu) db.menu = menuRecord.menu;
-    if (menuRecord.orders) db.orders = menuRecord.orders;
-    if (menuRecord.tables) db.tables = menuRecord.tables;
-    if (menuRecord.options) db.options = menuRecord.options;
-    if (menuRecord.settings) db.settings = { ...db.settings, ...menuRecord.settings };
-    if (menuRecord.nextMenuId) db.nextMenuId = menuRecord.nextMenuId;
-    if (menuRecord.nextOrderId) db.nextOrderId = menuRecord.nextOrderId;
-    if (menuRecord.nextOptionId) db.nextOptionId = menuRecord.nextOptionId;
-  }
-
-  // 2. ดึงข้อมูล Bin 2: ท็อปปิ้ง
-  let toppingsRecord = await fetchJsonBin(JSONBIN_TOPPINGS_ID);
-  if (!toppingsRecord && fs.existsSync(DATA_TOPPINGS_FILE)) {
-    try { toppingsRecord = JSON.parse(fs.readFileSync(DATA_TOPPINGS_FILE, 'utf8')); } catch(e) {}
-  }
-  if (toppingsRecord) {
-    if (Array.isArray(toppingsRecord.toppings)) db.toppings = toppingsRecord.toppings;
-    if (toppingsRecord.nextToppingId) db.nextToppingId = toppingsRecord.nextToppingId;
-  } else if (menuRecord && Array.isArray(menuRecord.toppings)) {
-    db.toppings = menuRecord.toppings;
-    if (menuRecord.nextToppingId) db.nextToppingId = menuRecord.nextToppingId;
-  }
-
-  // 3. ดึงข้อมูล Bin 3: รูปภาพ
-  let imagesRecord = await fetchJsonBin(JSONBIN_IMAGES_ID);
-  if (!imagesRecord && fs.existsSync(DATA_IMAGES_FILE)) {
-    try { imagesRecord = JSON.parse(fs.readFileSync(DATA_IMAGES_FILE, 'utf8')); } catch(e) {}
-  }
-  if (imagesRecord && imagesRecord.images) {
-    db.images = imagesRecord.images;
-  }
-
-  if (!db.images) db.images = {};
-  
-  // ล้างรูปภาพที่เสียหาย/ไม่สมบูรณ์ออกจากระบบทันที
-  Object.keys(db.images).forEach(k => {
-    if (!isValidImageStr(db.images[k])) {
-      delete db.images[k];
+    if (!record || (!record.menu?.length && !record.toppings?.length)) {
+      console.log('⏳ กำลังรันย้ายข้อมูลจาก 3 JSONBins เข้า MongoDB...');
+      await autoMigrateJSONBin();
+      record = await StoreModel.findOne({ key: 'main_store' });
     }
-  });
 
-  // Auto-migration
-  db.menu.forEach(m => {
-    if (m.image && isValidImageStr(m.image) && !db.images['menu_' + m.id]) {
-      db.images['menu_' + m.id] = m.image;
+    if (record) {
+      if (record.users) db.users = record.users;
+      if (record.sessions) db.sessions = record.sessions;
+      if (record.menu) db.menu = record.menu;
+      if (record.orders) db.orders = record.orders;
+      if (record.tables) db.tables = record.tables;
+      if (record.options) db.options = record.options;
+      if (record.toppings) db.toppings = record.toppings;
+      if (record.settings) db.settings = { ...db.settings, ...record.settings };
+      if (record.images) db.images = record.images;
+      if (record.nextMenuId) db.nextMenuId = record.nextMenuId;
+      if (record.nextOrderId) db.nextOrderId = record.nextOrderId;
+      if (record.nextOptionId) db.nextOptionId = record.nextOptionId;
+      if (record.nextToppingId) db.nextToppingId = record.nextToppingId;
     }
-  });
-  if (db.settings.logo && isValidImageStr(db.settings.logo) && !db.images['logo']) {
-    db.images['logo'] = db.settings.logo;
-  }
 
-  if (!db.users || !Array.isArray(db.users) || db.users.length === 0) {
-    db.users = [{ username: 'admin', password: hashPw('admin123'), role: 'admin' }];
-  } else {
-    const adminUser = db.users.find(u => u.username === 'admin');
-    if (adminUser) {
-      adminUser.password = hashPw('admin123');
+    if (!db.users || db.users.length === 0) {
+      db.users = [{ username: 'admin', password: hashPw('admin123'), role: 'admin' }];
     } else {
-      db.users.push({ username: 'admin', password: hashPw('admin123'), role: 'admin' });
+      const adminUser = db.users.find(u => u.username === 'admin');
+      if (!adminUser) db.users.push({ username: 'admin', password: hashPw('admin123'), role: 'admin' });
     }
-  }
 
-  if (!db.sessions || typeof db.sessions !== 'object') db.sessions = {};
-  if (!db.menu || !Array.isArray(db.menu)) db.menu = [];
-  if (!db.orders || !Array.isArray(db.orders)) db.orders = [];
-  if (!db.tables || !Array.isArray(db.tables)) db.tables = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
-  if (!db.toppings || !Array.isArray(db.toppings)) db.toppings = [];
-  if (!db.options || !Array.isArray(db.options)) db.options = [];
-  if (!db.settings) db.settings = {};
-  if (!db.settings.shopName) db.settings.shopName = 'เลยมาตำ';
-  if (!db.settings.theme) db.settings.theme = '#e85d04';
-  if (!db.settings.soundVolume) db.settings.soundVolume = '1.0';
-  if (!db.settings.customAudio) db.settings.customAudio = '';
-  if (!db.settings.loopInterval) db.settings.loopInterval = '5';
-  if (!db.settings.categoryOrder || !Array.isArray(db.settings.categoryOrder)) db.settings.categoryOrder = [];
-  if (!db.nextToppingId) db.nextToppingId = (db.toppings.length ? Math.max(...db.toppings.map(t => t.id)) + 1 : 1);
-  if (!db.nextOptionId) db.nextOptionId = (db.options.length ? Math.max(...db.options.map(o => o.id)) + 1 : 1);
+    if (!db.sessions) db.sessions = {};
+    if (!db.menu) db.menu = [];
+    if (!db.orders) db.orders = [];
+    if (!db.tables) db.tables = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
+    if (!db.toppings) db.toppings = [];
+    if (!db.options) db.options = [];
+    if (!db.settings) db.settings = {};
+    if (!db.images) db.images = {};
 
-  db.menu.forEach(m => { 
-    if (m.hasPlaraOption === undefined) m.hasPlaraOption = false; 
-    if (m.hasSpiceOption === undefined) m.hasSpiceOption = !!m.hasPlaraOption;
-    if (!Array.isArray(m.toppings)) m.toppings = [];
-    if (!Array.isArray(m.options)) m.options = [];
-    if (m.hasToppingOption === undefined) m.hasToppingOption = m.toppings.length > 0;
-    if (m.hasOptionChoice === undefined) m.hasOptionChoice = m.options.length > 0;
-  });
-  db.toppings.forEach(t => { if (!t.category) t.category = 'ท็อปปิ้งทั่วไป'; });
-  db.options.forEach(o => { 
-    if (!o.groupName) o.groupName = 'ตัวเลือกทั่วไป'; 
-    if (o.price === undefined) o.price = 0; 
-  });
-  save();
-}
-
-let saveMenuTimer = null, saveToppingsTimer = null, saveImagesTimer = null;
-
-function saveMenu() {
-  const menuData = {
-    users: db.users,
-    sessions: db.sessions,
-    menu: db.menu.map(m => {
-      const { image, ...rest } = m;
-      return rest;
-    }),
-    orders: db.orders,
-    tables: db.tables,
-    options: db.options,
-    settings: { ...db.settings, logo: '' },
-    nextMenuId: db.nextMenuId,
-    nextOrderId: db.nextOrderId,
-    nextOptionId: db.nextOptionId
-  };
-
-  try { fs.writeFileSync(DATA_MENU_FILE, JSON.stringify(menuData, null, 2)); } catch(e) {}
-
-  if (JSONBIN_MENU_ID && JSONBIN_KEY) {
-    if (saveMenuTimer) clearTimeout(saveMenuTimer);
-    saveMenuTimer = setTimeout(() => {
-      fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_MENU_ID}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY },
-        body: JSON.stringify(menuData)
-      }).catch(e => console.error('❌ JSONBIN Menu Save Error:', e));
-    }, 1000);
+    save();
+  } catch (err) {
+    console.error('❌ initStorage Error:', err.message);
   }
 }
 
-function saveToppings() {
-  const toppingsData = {
-    toppings: db.toppings,
-    nextToppingId: db.nextToppingId
-  };
-
-  try { fs.writeFileSync(DATA_TOPPINGS_FILE, JSON.stringify(toppingsData, null, 2)); } catch(e) {}
-
-  if (JSONBIN_TOPPINGS_ID && JSONBIN_KEY) {
-    if (saveToppingsTimer) clearTimeout(saveToppingsTimer);
-    saveToppingsTimer = setTimeout(() => {
-      fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_TOPPINGS_ID}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY },
-        body: JSON.stringify(toppingsData)
-      }).catch(e => console.error('❌ JSONBIN Toppings Save Error:', e));
-    }, 1000);
-  }
-}
-
-function saveImages() {
-  // ลบรูปภาพที่ไม่ได้ถูกใช้งานแล้วออกจาก Bin รูปภาพเพื่อประหยัดโควต้า
-  if (db.images) {
-    const validKeys = new Set(['logo', ...db.menu.map(m => 'menu_' + m.id)]);
-    Object.keys(db.images).forEach(k => {
-      if (!validKeys.has(k)) delete db.images[k];
-    });
-  }
-
-  const imagesData = {
-    images: db.images || {}
-  };
-
-  try { fs.writeFileSync(DATA_IMAGES_FILE, JSON.stringify(imagesData, null, 2)); } catch(e) {}
-
-  if (JSONBIN_IMAGES_ID && JSONBIN_KEY) {
-    if (saveImagesTimer) clearTimeout(saveImagesTimer);
-    saveImagesTimer = setTimeout(() => {
-      fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_IMAGES_ID}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY },
-        body: JSON.stringify(imagesData)
-      }).then(res => {
-        if (!res.ok) console.error('❌ JSONBin Images Save Failed Status:', res.status);
-        else console.log('✅ บันทึกรูปภาพลง JSONBin เรียบร้อย');
-      }).catch(e => console.error('❌ JSONBIN Images Save Error:', e));
-    }, 1000);
-  }
-}
-
+// 🟢 ฟังก์ชันบันทึกข้อมูลลง MongoDB Atlas
+let saveTimer = null;
 function save() {
-  saveMenu();
-  saveToppings();
-  saveImages();
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try {
+      await StoreModel.updateOne(
+        { key: 'main_store' },
+        { 
+          $set: {
+            users: db.users,
+            sessions: db.sessions,
+            menu: db.menu,
+            orders: db.orders,
+            tables: db.tables,
+            options: db.options,
+            toppings: db.toppings,
+            settings: db.settings,
+            images: db.images,
+            nextMenuId: db.nextMenuId,
+            nextOrderId: db.nextOrderId,
+            nextOptionId: db.nextOptionId,
+            nextToppingId: db.nextToppingId
+          }
+        },
+        { upsert: true }
+      );
+      console.log('✅ บันทึกข้อมูลลง MongoDB Atlas เรียบร้อย');
+    } catch (e) {
+      console.error('❌ บันทึกข้อมูลลง MongoDB ล้มเหลว:', e.message);
+    }
+  }, 1000);
 }
+
+// เชื่อมโยงฟังก์ชันเซฟเดิมทั้งหมดเข้ากับระบบ MongoDB
+function saveMenu() { save(); }
+function saveToppings() { save(); }
+function saveImages() { save(); }
 
 function getMenuWithImages() {
   return db.menu.map(m => ({
@@ -429,13 +316,13 @@ const server = http.createServer(async (req, res) => {
         if (db.tables.includes(tableName)) return send(res, 400, { error: 'มีโต๊ะนี้อยู่ในระบบแล้ว' });
         db.tables.push(tableName);
         db.tables.sort((a, b) => String(a).localeCompare(String(b), 'th', { numeric: true }));
-        saveMenu();
+        save();
         return send(res, 201, db.tables);
       }
       if (method === 'DELETE' && id) {
         const tableName = decodeURIComponent(id);
         db.tables = db.tables.filter(t => t !== tableName);
-        saveMenu();
+        save();
         return send(res, 200, db.tables);
       }
     }
@@ -448,15 +335,14 @@ const server = http.createServer(async (req, res) => {
         if (!t) return send(res, 400, { error: 'ข้อมูลท็อปปิ้งไม่ถูกต้อง' });
         t.id = db.nextToppingId++;
         db.toppings.push(t); 
-        saveToppings();
+        save();
         return send(res, 201, t);
       }
       if (method === 'DELETE' && id) {
         const tid = Number(id);
         db.toppings = db.toppings.filter(t => t.id !== tid);
         db.menu.forEach(m => { m.toppings = (m.toppings || []).filter(x => x !== tid); });
-        saveToppings();
-        saveMenu();
+        save();
         return send(res, 200, db.toppings);
       }
     }
@@ -469,14 +355,14 @@ const server = http.createServer(async (req, res) => {
         if (!o) return send(res, 400, { error: 'ข้อมูลตัวเลือกไม่ถูกต้อง' });
         o.id = db.nextOptionId++;
         db.options.push(o); 
-        saveMenu();
+        save();
         return send(res, 201, o);
       }
       if (method === 'DELETE' && id) {
         const oid = Number(id);
         db.options = db.options.filter(o => o.id !== oid);
         db.menu.forEach(m => { m.options = (m.options || []).filter(x => x !== oid); });
-        saveMenu();
+        save();
         return send(res, 200, db.options);
       }
     }
@@ -488,14 +374,13 @@ const server = http.createServer(async (req, res) => {
       if (body.shopName) db.settings.shopName = String(body.shopName);
       if (body.logo && isValidImageStr(body.logo)) {
         db.images['logo'] = String(body.logo).trim();
-        saveImages();
       }
       if (body.soundType) db.settings.soundType = String(body.soundType);
       if (body.customAudio !== undefined) db.settings.customAudio = String(body.customAudio);
       if (body.soundVolume) db.settings.soundVolume = String(body.soundVolume);
       if (body.loopInterval) db.settings.loopInterval = String(body.loopInterval);
       if (Array.isArray(body.categoryOrder)) db.settings.categoryOrder = body.categoryOrder;
-      saveMenu();
+      save();
       return send(res, 200, getSettingsWithLogo());
     }
 
@@ -507,13 +392,13 @@ const server = http.createServer(async (req, res) => {
       const t = crypto.randomBytes(32).toString('hex');
       if (!db.sessions) db.sessions = {};
       db.sessions[t] = { username: u.username, role: u.role, expires: Date.now() + 12 * 3600e3 };
-      saveMenu();
+      save();
 
       return send(res, 200, { token: t });
     }
     if (part === 'logout' && method === 'POST') {
       if (db.sessions && token) delete db.sessions[token];
-      saveMenu();
+      save();
       return send(res, 200, { ok: true });
     }
     if (part === 'me' && method === 'GET') {
@@ -532,11 +417,10 @@ const server = http.createServer(async (req, res) => {
         
         if (item.image && isValidImageStr(item.image)) {
           db.images['menu_' + item.id] = item.image;
-          saveImages();
         }
         
         db.menu.push(item); 
-        saveMenu();
+        save();
         return send(res, 201, { ...item, image: db.images['menu_' + item.id] || '' });
       }
       const i = db.menu.findIndex(x => x.id === Number(id));
@@ -546,22 +430,19 @@ const server = http.createServer(async (req, res) => {
         if (!item) return send(res, 400, { error: 'ข้อมูลเมนูไม่ถูกต้อง' });
         item.id = db.menu[i].id;
 
-        // อัปเดตรูปเฉพาะเมื่อรูปที่ส่งมามีความสมบูรณ์
         if (body.image && isValidImageStr(body.image)) {
           db.images['menu_' + item.id] = body.image.trim();
-          saveImages();
         }
 
         db.menu[i] = item; 
-        saveMenu();
+        save();
         return send(res, 200, { ...item, image: db.images['menu_' + item.id] || '' });
       }
       if (method === 'DELETE') { 
         const delId = db.menu[i].id;
         db.menu.splice(i, 1); 
         delete db.images['menu_' + delId];
-        saveMenu(); 
-        saveImages();
+        save(); 
         return send(res, 200, { ok: true }); 
       }
     }
@@ -640,7 +521,7 @@ const server = http.createServer(async (req, res) => {
           createdAt: new Date().toISOString()
         };
         db.orders.push(order); 
-        saveMenu();
+        save();
         return send(res, 201, order);
       }
       if (method === 'GET' && id) {
@@ -659,13 +540,13 @@ const server = http.createServer(async (req, res) => {
         if (!o) return send(res, 404, { error: 'ไม่พบออเดอร์' });
         if (!STATUSES.includes(body.status)) return send(res, 400, { error: 'สถานะไม่ถูกต้อง' });
         o.status = body.status; 
-        saveMenu();
+        save();
         return send(res, 200, o);
       }
       if (method === 'DELETE' && !id) {
         if (!need('admin')) return;
         db.orders = [];
-        saveMenu();
+        save();
         return send(res, 200, { ok: true });
       }
     }
@@ -681,7 +562,7 @@ const server = http.createServer(async (req, res) => {
         if (!['admin', 'staff'].includes(role)) return send(res, 400, { error: 'สิทธิ์ไม่ถูกต้อง' });
         if (db.users.some(u => u.username === username)) return send(res, 400, { error: 'มีชื่อผู้ใช้นี้แล้ว' });
         db.users.push({ username: username, password: hashPw(password), role: role }); 
-        saveMenu();
+        save();
         return send(res, 201, { username: username, role: role });
       }
       if (method === 'DELETE' && id) {
@@ -693,7 +574,7 @@ const server = http.createServer(async (req, res) => {
             if (s.username === name) delete db.sessions[t];
           }
         }
-        saveMenu();
+        save();
         return send(res, 200, { ok: true });
       }
     }
@@ -707,7 +588,7 @@ const server = http.createServer(async (req, res) => {
 
 initStorage().then(() => {
   server.listen(PORT, '0.0.0.0', () => {
-    console.log('===== เซิร์ฟเวอร์ทำงานแล้ว (ระบบ 3 Bins พร้อมใช้งาน) =====');
+    console.log('===== เซิร์ฟเวอร์ทำงานแล้ว (ระบบเชื่อมต่อ MongoDB Atlas + Auto-Migrate พร้อมใช้งาน) =====');
   });
 });
 
@@ -1434,7 +1315,6 @@ window.currentSoundVol = 1.0;
 window.currentLoopInterval = 5000;
 window.currentActiveAudio = null;
 
-// 1. ระบบบีบอัดภาพเมนูอัตโนมัติ (ขนาด 350px / Quality 0.45 ไฟล์เบาเพียง 8-12KB)
 function handleFile(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -1469,7 +1349,6 @@ function handleFile(e) {
   reader.readAsDataURL(file);
 }
 
-// 2. ระบบบีบอัดโลโก้ร้านอัตโนมัติ
 function handleLogoFile(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -1498,7 +1377,6 @@ function handleLogoFile(e) {
   reader.readAsDataURL(file);
 }
 
-// 3. ระบบตัดเสียงไม่เกิน 30 วินาที + บีบอัดเสียง Mono 22.05kHz
 function handleAudioFile(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -2398,7 +2276,6 @@ async function init() {
   $('who').textContent = me ? me.username + ' (' + (me.role === 'admin' ? 'ผู้ดูแล' : 'พนักงาน') + ')' : '';
   if (!me) return;
 
-  // 🟢 สั่งให้หน้าจอเปิดค้างไว้ทันทีเมื่อเข้าสู่ระบบหลังร้าน
   enableKeepScreenOn();
 
   document.querySelectorAll('.adminOnly').forEach(el => { el.hidden = me.role !== 'admin'; });
