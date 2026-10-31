@@ -133,7 +133,7 @@ async function initStorage() {
 }
 
 
-// 🟢 ฟังก์ชันบันทึกข้อมูลลง MongoDB Atlas
+// 🟢 ฟังก์ชันบันทึกข้อมูลลง MongoDB Atlas (แก้ไข async/await ถูกต้อง)
 let saveTimer = null;
 function save() {
   if (saveTimer) clearTimeout(saveTimer);
