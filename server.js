@@ -8,15 +8,6 @@ const mongoose = require('mongoose');
 const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI;
 
-
-// ตั้งค่า BIN IDs และ MASTER KEY สำหรับย้ายข้อมูล
-const BIN_IDS = [
-  '6ae0b27fffd5d160538ff96e', // Bin 1: รูปภาพ
-  '6ae0b22effd5d160538ff865', // Bin 2: ท็อปปิ้ง
-  '6ad9eacdffd5d1605382454d'  // Bin 3: เมนู & ระบบหลัก
-];
-const MASTER_KEY = process.env.JSONBIN_KEY || '$2a$10$8u3JlCEVMeRuRLHXIL/R/OT0QICvvBrsx2LQykKP4jv/rJD5qN2je';
-
 const SPICE_LEVELS = ['ไม่พริก', 'เผ็ดน้อย', 'เผ็ดกลาง', 'เผ็ดมาก'];
 
 function hashPw(pw, salt) {
@@ -85,44 +76,6 @@ let db = {
   images: {} 
 };
 
-// 🟢 ฟังก์ชันย้ายข้อมูลจาก 3 JSONBins เข้า MongoDB Atlas อัตโนมัติ
-// 🟢 ฟังก์ชันย้ายข้อมูลจาก 3 JSONBins เข้า MongoDB Atlas (ดึง Toppings ชัวร์ 100%)
-async function autoMigrateJSONBin() {
-  try {
-    const headers = {};
-    if (MASTER_KEY) headers['X-Master-Key'] = MASTER_KEY;
-
-    const fetches = BIN_IDS.map(id => 
-      fetch(`https://api.jsonbin.io/v3/b/${id}/latest`, { headers })
-        .then(r => r.json())
-        .then(res => res.record || {})
-        .catch(() => ({}))
-    );
-
-    const [b1, b2, b3] = await Promise.all(fetches);
-    
-    // ดึงรายการ Toppings จาก Bin 2 หรือ Bin 3
-    const toppingsList = (Array.isArray(b2.toppings) && b2.toppings.length > 0) 
-      ? b2.toppings 
-      : ((Array.isArray(b3.toppings) && b3.toppings.length > 0) ? b3.toppings : []);
-
-    const nextToppingId = b2.nextToppingId || b3.nextToppingId || (toppingsList.length ? Math.max(...toppingsList.map(t => t.id || 0)) + 1 : 1);
-
-    const mergedData = {
-      users: b3.users || b1.users || b2.users || db.users,
-      menu: b3.menu || b1.menu || b2.menu || [],
-      toppings: toppingsList,
-      options: b3.options || b1.options || b2.options || [],
-      tables: b3.tables || b1.tables || b2.tables || db.tables,
-      orders: b3.orders || b1.orders || b2.orders || [],
-      settings: { ...(b1.settings || {}), ...(b2.settings || {}), ...(b3.settings || {}) },
-      images: { ...(b1.images || {}), ...(b2.images || {}), ...(b3.images || {}) },
-      nextMenuId: b3.nextMenuId || 1,
-      nextOrderId: b3.nextOrderId || 1,
-      nextOptionId: b3.nextOptionId || 1,
-      nextToppingId: nextToppingId
-    };
-
     await StoreModel.updateOne(
       { key: 'main_store' },
       { $set: { key: 'main_store', ...mergedData } },
@@ -139,13 +92,7 @@ async function initStorage() {
     await mongoose.connect(MONGODB_URI);
     console.log('✅ เชื่อมต่อ MongoDB Atlas สำเร็จ');
 
-    // 🟢 สั่งรันย้ายข้อมูลซ้ำทุกครั้งที่เริ่มระบบหากยังไม่มี Topping
     let record = await StoreModel.findOne({ key: 'main_store' });
-    if (!record || !record.toppings || record.toppings.length === 0) {
-      console.log('⏳ กำลังดึงข้อมูล Toppings จาก JSONBin เข้า MongoDB Atlas...');
-      await autoMigrateJSONBin();
-      record = await StoreModel.findOne({ key: 'main_store' });
-    }
 
     if (record) {
       if (record.users) db.users = record.users;
@@ -184,6 +131,7 @@ async function initStorage() {
     console.error('❌ initStorage Error:', err.message);
   }
 }
+
 
 // 🟢 ฟังก์ชันบันทึกข้อมูลลง MongoDB Atlas
 let saveTimer = null;
