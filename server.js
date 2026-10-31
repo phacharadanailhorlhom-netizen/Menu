@@ -187,6 +187,7 @@ async function initStorage() {
 
 
 
+
     if (record) {
       if (record.users) db.users = record.users;
       if (record.sessions) db.sessions = record.sessions;
