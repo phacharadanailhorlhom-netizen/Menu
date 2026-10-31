@@ -163,11 +163,28 @@ async function initStorage() {
       if (record.nextToppingId) db.nextToppingId = record.nextToppingId;
     }
 
+    if (!db.users || db.users.length === 0) {
+      db.users = [{ username: 'admin', password: hashPw('admin123'), role: 'admin' }];
+    } else {
+      const adminUser = db.users.find(u => u.username === 'admin');
+      if (!adminUser) db.users.push({ username: 'admin', password: hashPw('admin123'), role: 'admin' });
+    }
+
+    if (!db.sessions) db.sessions = {};
+    if (!db.menu) db.menu = [];
+    if (!db.orders) db.orders = [];
+    if (!db.tables) db.tables = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
+    if (!db.toppings) db.toppings = [];
+    if (!db.options) db.options = [];
+    if (!db.settings) db.settings = {};
+    if (!db.images) db.images = {};
+
     save();
   } catch (err) {
     console.error('❌ initStorage Error:', err.message);
   }
 }
+
 
 
     if (record) {
