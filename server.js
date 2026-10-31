@@ -86,6 +86,7 @@ let db = {
 };
 
 // 🟢 ฟังก์ชันย้ายข้อมูลจาก 3 JSONBins เข้า MongoDB Atlas อัตโนมัติ
+// 🟢 ฟังก์ชันย้ายข้อมูลจาก 3 JSONBins เข้า MongoDB Atlas (ดึง Toppings ชัวร์ 100%)
 async function autoMigrateJSONBin() {
   try {
     const headers = {};
@@ -100,29 +101,34 @@ async function autoMigrateJSONBin() {
 
     const [b1, b2, b3] = await Promise.all(fetches);
     
-    if (b1.menu || b2.menu || b3.menu || b1.toppings || b2.toppings || b3.toppings || b1.images || b2.images || b3.images) {
-      const mergedData = {
-        users: b1.users || b2.users || b3.users || db.users,
-        menu: b1.menu || b2.menu || b3.menu || [],
-        toppings: b1.toppings || b2.toppings || b3.toppings || [],
-        options: b1.options || b2.options || b3.options || [],
-        tables: b1.tables || b2.tables || b3.tables || db.tables,
-        orders: b1.orders || b2.orders || b3.orders || [],
-        settings: { ...(b1.settings || {}), ...(b2.settings || {}), ...(b3.settings || {}) },
-        images: { ...(b1.images || {}), ...(b2.images || {}), ...(b3.images || {}) },
-        nextMenuId: b1.nextMenuId || b2.nextMenuId || b3.nextMenuId || 1,
-        nextOrderId: b1.nextOrderId || b2.nextOrderId || b3.nextOrderId || 1,
-        nextOptionId: b1.nextOptionId || b2.nextOptionId || b3.nextOptionId || 1,
-        nextToppingId: b1.nextToppingId || b2.nextToppingId || b3.nextToppingId || 1
-      };
+    // ดึงรายการ Toppings จาก Bin 2 หรือ Bin 3
+    const toppingsList = (Array.isArray(b2.toppings) && b2.toppings.length > 0) 
+      ? b2.toppings 
+      : ((Array.isArray(b3.toppings) && b3.toppings.length > 0) ? b3.toppings : []);
 
-      await StoreModel.updateOne(
-        { key: 'main_store' },
-        { $set: { key: 'main_store', ...mergedData } },
-        { upsert: true }
-      );
-      console.log('🎉 ✅ ย้ายข้อมูลจาก 3 Bin เข้า MongoDB Atlas สำเร็จเรียบร้อย!');
-    }
+    const nextToppingId = b2.nextToppingId || b3.nextToppingId || (toppingsList.length ? Math.max(...toppingsList.map(t => t.id || 0)) + 1 : 1);
+
+    const mergedData = {
+      users: b3.users || b1.users || b2.users || db.users,
+      menu: b3.menu || b1.menu || b2.menu || [],
+      toppings: toppingsList,
+      options: b3.options || b1.options || b2.options || [],
+      tables: b3.tables || b1.tables || b2.tables || db.tables,
+      orders: b3.orders || b1.orders || b2.orders || [],
+      settings: { ...(b1.settings || {}), ...(b2.settings || {}), ...(b3.settings || {}) },
+      images: { ...(b1.images || {}), ...(b2.images || {}), ...(b3.images || {}) },
+      nextMenuId: b3.nextMenuId || 1,
+      nextOrderId: b3.nextOrderId || 1,
+      nextOptionId: b3.nextOptionId || 1,
+      nextToppingId: nextToppingId
+    };
+
+    await StoreModel.updateOne(
+      { key: 'main_store' },
+      { $set: { key: 'main_store', ...mergedData } },
+      { upsert: true }
+    );
+    console.log(`🎉 ✅ ย้ายข้อมูลสำเร็จ! ดึง Toppings เข้ามาได้ทั้งหมด ${toppingsList.length} รายการ`);
   } catch (e) {
     console.error('❌ Migration Error:', e.message);
   }
@@ -133,13 +139,36 @@ async function initStorage() {
     await mongoose.connect(MONGODB_URI);
     console.log('✅ เชื่อมต่อ MongoDB Atlas สำเร็จ');
 
-    // ตรวจสอบว่าใน MongoDB Atlas มีข้อมูลหรือยัง หากยังไม่มีให้รันย้ายข้อมูลจาก JSONBin อัตโนมัติ
+    // 🟢 สั่งรันย้ายข้อมูลซ้ำทุกครั้งที่เริ่มระบบหากยังไม่มี Topping
     let record = await StoreModel.findOne({ key: 'main_store' });
-    if (!record || (!record.menu?.length && !record.toppings?.length)) {
-      console.log('⏳ กำลังรันย้ายข้อมูลจาก 3 JSONBins เข้า MongoDB...');
+    if (!record || !record.toppings || record.toppings.length === 0) {
+      console.log('⏳ กำลังดึงข้อมูล Toppings จาก JSONBin เข้า MongoDB Atlas...');
       await autoMigrateJSONBin();
       record = await StoreModel.findOne({ key: 'main_store' });
     }
+
+    if (record) {
+      if (record.users) db.users = record.users;
+      if (record.sessions) db.sessions = record.sessions;
+      if (record.menu) db.menu = record.menu;
+      if (record.orders) db.orders = record.orders;
+      if (record.tables) db.tables = record.tables;
+      if (record.options) db.options = record.options;
+      if (record.toppings) db.toppings = record.toppings;
+      if (record.settings) db.settings = { ...db.settings, ...record.settings };
+      if (record.images) db.images = record.images;
+      if (record.nextMenuId) db.nextMenuId = record.nextMenuId;
+      if (record.nextOrderId) db.nextOrderId = record.nextOrderId;
+      if (record.nextOptionId) db.nextOptionId = record.nextOptionId;
+      if (record.nextToppingId) db.nextToppingId = record.nextToppingId;
+    }
+
+    save();
+  } catch (err) {
+    console.error('❌ initStorage Error:', err.message);
+  }
+}
+
 
     if (record) {
       if (record.users) db.users = record.users;
